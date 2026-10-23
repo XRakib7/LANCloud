@@ -403,7 +403,7 @@ if __name__ == '__main__':
     except OSError:
         ip = '127.0.0.1'
 
-    print(f'File Manager running at:')
+    print(f'Online File Manager running at:')
     print(f'  Local:   http://127.0.0.1:5000')
     print(f'  Network: http://{ip}:5000')
     print(f'  Home:    {HOME_DIR}')

@@ -1,270 +1,239 @@
-# Flask File Manager
+# 📂 Online File Manager
 
-> A lightweight, self-hosted web-based file manager built with Flask. Browse, upload, download, edit, rename, and delete files and folders from any device on your network — no cloud account, no third-party dependency, your files stay on your own machine.
+> **Turn any computer into your personal cloud — in 30 seconds.** Share, access, and manage your files from your phone, tablet, laptop, or any other device on the same WiFi. No accounts, no sign-ups, no cables, no cloud storage limits, no monthly fees. Your files never leave your home network.
 
 [![Python](https://img.shields.io/badge/Python-3.x-blue?logo=python)](https://www.python.org/)
-[![Flask](https://img.shields.io/badge/Flask-3.1.3-000000?logo=flask)](https://flask.palletsprojects.com/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
+[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](#contributing)
 
 ---
 
-## Table of Contents
+## 🌟 What Is This?
 
-- [About](#about)
-- [Why This Project Exists](#why-this-project-exists)
-- [Key Features](#key-features)
-- [Tech Stack](#tech-stack)
-- [Project Structure](#project-structure)
-- [Screenshots](#screenshots)
-- [Getting Started](#getting-started)
-  - [Prerequisites](#prerequisites)
-  - [Installation](#installation)
-  - [Running the Application](#running-the-application)
-- [How to Use](#how-to-use)
-- [VirtualBox / Network Access](#virtualbox--network-access)
-- [Security](#security)
-- [Customization](#customization)
-- [Roadmap](#roadmap)
-- [Contributing](#contributing)
-- [License](#license)
-- [Author](#author)
+**Online File Manager** gives your computer a clean, beautiful web interface for your files — and then shares it with every device on your WiFi network.
+
+Run it on your PC (or a VM, or a spare laptop, or a Raspberry Pi), and instantly open your files from:
+
+- 📱 **Your phone** — grab photos, documents, or music from your PC while on the couch
+- 💻 **Another laptop** — pull that report off your desktop without emailing yourself
+- 📟 **A tablet** — read PDFs straight off your computer's drive
+- 🖥️ **A virtual machine** — finally an easy way to move files in and out of VirtualBox VMs
+
+All you need is a web browser. That's it. **Nothing else needed.**
 
 ---
 
-## About
+## 💡 Why You Need This
 
-**Flask File Manager** is a personal, self-hosted file management web application. It runs a small Flask server on your computer (or virtual machine) and exposes a clean, responsive browser interface so you can manage your filesystem from any device on the same network.
+Ever run into these situations?
 
-It is ideal for accessing files on a headless Debian VM (e.g., VirtualBox) from your Windows/macOS/Linux host or phone without setting up Samba/NFS shares, SSH/SCP, or uploading to a third-party cloud.
+| 😩 The Problem | ✅ With Online File Manager |
+|---|---|
+| "How do I get this file from my PC to my phone?" | Open the network URL on your phone, tap download. Done. |
+| Emailing files to yourself like a caveman | Your files are one browser tab away, always |
+| USB cables, pendrives, Bluetooth pairing rituals | Zero hardware, zero pairing — just WiFi and a browser |
+| Cloud uploads of large files taking forever | Transfers happen directly over your local network — gigabit speed |
+| Privacy worries about files on Google Drive / Dropbox | Your files **never leave your machine**. Nothing is uploaded anywhere |
+| Free cloud storage is full, paywall asking for a subscription | Unlimited storage — your disk is the limit |
+| Setting up Samba, NFS, or SSH feels like rocket science | One command: `python app.py`. You're done |
 
----
-
-## Why This Project Exists
-
-Managing files on a remote machine, virtual machine, or headless server usually forces you into one of these painful options:
-
-| Typical Approach | Pain Point |
-|------------------|------------|
-| Samba / NFS shares | Complex setup, firewall config, not beginner-friendly |
-| SSH / SCP | Command-line only, not convenient for quick edits |
-| Google Drive / Dropbox | Privacy concerns, third-party dependency, sync delays |
-| Heavy file-manager services | Overkill for personal use, hard to maintain |
-
-**Flask File Manager** removes that friction:
-
-- ✅ **Zero accounts** — your files never leave your machine
-- ✅ **One-command setup** — `pip install flask && python app.py`
-- ✅ **Accessible from any browser** on the same WiFi (phone, laptop, tablet)
-- ✅ **Mobile-friendly** responsive UI with light/dark theme
-- ✅ **Folder upload/download as ZIP**, inline text editing, live search, sortable columns
-
-Whether you're moving files between a VM and your laptop, editing configs on a remote box, or just want private self-hosted file access — this tool gets out of your way.
+**In short:** it's your own private cloud, without the cloud.
 
 ---
 
-## Key Features
+## 🚀 What It Can Do
 
-| Feature | Description |
-|---------|-------------|
-| 📂 **Browse** | Navigate directories with breadcrumb trails and parent-directory links |
-| ⬆️ **Upload Files** | Upload one or many files to the current directory |
-| 📁 **Upload Folders** | Upload entire folder structures (browser `webkitdirectory` support) |
-| ⬇️ **Download Files** | Download individual files directly from the browser |
-| 📦 **Download Folders** | Download any folder as a ZIP archive |
-| ✏️ **Edit Text Files** | Open and edit text/source files inline in the browser |
-| 🆕 **New Folder** | Create folders from the toolbar |
-| 🗑️ **Delete** | Remove files and folders (with confirmation dialog) |
-| 🔍 **Search** | Client-side live search to filter files instantly |
-| 🔀 **Sort** | Clickable, sortable columns (Name, Size, Type, Date Modified) |
-| 🌓 **Dark Mode** | Light/dark theme toggle, persisted in `localStorage` |
-| 📱 **Responsive** | Works on desktop and mobile browsers |
-| 🔔 **Flash Messages** | Success/error feedback after every action |
+Everything you'd expect from a full file manager — right in your browser:
 
----
+| | Feature | What You Get |
+|---|---|---|
+| 📂 | **Browse everything** | Navigate your entire filesystem with breadcrumbs, from your home directory down to any folder |
+| ⬆️ | **Upload files** | Send files *to* your computer from any device — multiple files at once |
+| 📁 | **Upload whole folders** | Drop an entire folder (with subfolders) from your phone straight onto your PC |
+| ⬇️ | **Download files** | Grab any single file to any device instantly |
+| 📦 | **Download folders as ZIP** | One click, the whole folder gets zipped and sent to you |
+| ✏️ | **Edit text files in-browser** | Fix a config, tweak a script, update notes — edit and save without downloading anything |
+| 🆕 | **Create folders** | New folders created right from the toolbar |
+| 🔀 | **Rename** | Rename any file or folder from the browser |
+| 🗑️ | **Delete** | Remove files and folders (with confirmation — no accidental wipes) |
+| 🔍 | **Instant search** | Live filtering as you type — find that one file in a folder of hundreds |
+| ↕️ | **Sortable columns** | Sort by Name, Size, Type, or Date Modified with a click |
+| 🌓 | **Dark mode** | Easy on the eyes at night — your preference is remembered |
+| 📱 | **Fully responsive** | Looks and works great on phones, tablets, and desktops |
+| 🧠 | **Smart file icons** | Instantly recognizes code, text, images, video, audio, archives, and PDFs |
 
-## Tech Stack
+### 💪 How Powerful Is It?
 
-- **Backend:** Python 3 + Flask (micro web framework)
-- **Frontend:** Vanilla HTML5, CSS3 (CSS custom properties), vanilla JavaScript — no build step, no frontend frameworks
-- **Templating:** Jinja2 (Flask's built-in templating engine)
-- **Packaging:** `requirements.txt` with a pinned Flask version
-
----
-
-## Project Structure
-
-```
-filemanager/
-├── app.py              # Flask application — all routes and file logic
-├── requirements.txt    # Python dependencies (Flask==3.1.3)
-├── README.md           # This file
-├── LICENSE             # MIT License
-├── .gitignore          # Git ignore rules
-└── templates/
-    ├── index.html      # Main file-browser UI
-    ├── edit.html       # Text-file editor page
-    └── rename.html     # Rename dialog page
-```
+- **Full filesystem access** — not a sandboxed "storage folder" like cloud apps. Browse your *entire* disk, including the root directory (`/`) if you want.
+- **Gigabit transfers** — everything moves over your local WiFi/LAN, not through some server across the world. A 2 GB file takes seconds, not an hour.
+- **Unlimited space** — the only limit is your hard drive.
+- **Unlimited devices** — phone, laptop, tablet, smart TV browser, anything with a browser on the network.
+- **True two-way street** — unlike most "sharing" tools that only send, this one uploads *and* downloads *and* edits *and* organizes. It's a complete file manager, not just a file dropper.
+- **Runs anywhere Python runs** — Windows, macOS, Linux, a VM, a Raspberry Pi, an old laptop gathering dust in a drawer. Turn that old machine into a home file server in one command.
 
 ---
 
-## Screenshots
-
-> Add screenshots here showing:
-> 1. **File Browser** — table view with icons, file sizes, dates, and action buttons
-> 2. **Text Editor** — monospace editor for quick config or code tweaks
-> 3. **Dark Theme** — easy on the eyes for night sessions
-
----
-
-## Getting Started
+## 🏁 Getting Started
 
 ### Prerequisites
 
-- Python 3.x
-- `pip` (Python package installer)
+Only one thing:
+
+- **Python 3** installed ([python.org](https://www.python.org/downloads/))
+
+That's it. No database, no Node.js, no Docker, no config files.
 
 ### Installation
 
 ```bash
-# Clone the repository
-git clone https://github.com/YOUR_USERNAME/flask-file-manager.git
-cd flask-file-manager
+# 1. Clone the repository
+git clone https://github.com/rakibhossain/online-file-manager.git
+cd online-file-manager
 
-# Install dependencies
+# 2. Install the single dependency
 pip install -r requirements.txt
-# (or: pip3 install -r requirements.txt)
 ```
 
-### Running the Application
+### Run It
 
 ```bash
 python app.py
-# (or: python3 app.py)
 ```
 
-You will see output like this:
+You'll see something like:
 
 ```
-File Manager running at:
+Online File Manager running at:
   Local:   http://127.0.0.1:5000
-  Network: http://192.168.1.xx:5000
+  Network: http://192.168.1.10:5000
   Home:    /home/yourname
   Root:    /
 ```
 
-- Open `http://127.0.0.1:5000` on the same machine.
-- Use the **Network** URL from any other device on the same WiFi.
+- **On the same computer:** open `http://127.0.0.1:5000`
+- **On your phone / any other device on the WiFi:** open the **Network** address, e.g. `http://192.168.1.10:5000`
+
+🎉 **That's the whole setup.** Your computer is now a personal cloud.
+
+> 💡 **Tip:** Bookmark the network address on your phone. As long as this app is running on your PC, your files are one tap away.
 
 ---
 
-## How to Use
+## 📖 How To Use
 
-1. **Browse** — Click a folder name to go inside; click `..` to go up. Use the breadcrumb trail at the top to jump between levels.
-2. **Upload files** — Click **Upload File**, select one or more files; they save to the current folder.
-3. **Upload folders** — Click **Upload Folder** and select a folder; its contents upload preserving the folder structure.
-4. **Create folder** — Click **New Folder** and type a name.
-5. **Download a file** — Click the download icon (↓) next to any file.
-6. **Download a folder** — Click **Download Folder** to grab the whole folder as a ZIP.
-7. **Edit a text file** — Click the edit icon (✏️) next to a text file, make changes, then **Save Changes**.
-8. **Rename** — Click the rename icon next to any item and enter a new name.
-9. **Delete** — Click the trash icon (🗑️) and confirm — deletion is permanent.
-10. **Search** — Type in the search box to filter files as you type.
-11. **Sort** — Click any column header (Name, Size, Type, Date Modified) to sort the list.
+| Action | How |
+|---|---|
+| **Browse** | Click a folder to open it, click `..` to go up, or use the breadcrumb trail at the top |
+| **Upload a file** | Click **Upload File** — pick one or many — they land in the current folder |
+| **Upload a folder** | Click **Upload Folder** — the whole folder structure uploads intact |
+| **Download a file** | Tap the ↓ icon next to it |
+| **Download a folder** | Click **Download Folder** — you get a ZIP |
+| **Edit a text file** | Tap the ✏️ icon, make your change, hit **Save Changes** |
+| **Rename** | Tap the rename icon and type a new name |
+| **Delete** | Tap 🗑️ and confirm (permanent — be careful!) |
+| **Create a folder** | Click **New Folder** and name it |
+| **Search** | Just start typing in the search box — the list filters live |
+| **Sort** | Click any column header (Name / Size / Type / Modified) |
+| **Dark mode** | Toggle the theme switch — it's remembered across visits |
+
+### Root access
+
+Start from your home directory, but a **Root** option lets you browse the entire filesystem — perfect for editing system configs on a VM.
 
 ---
 
-## VirtualBox / Network Access
+## 🖥️ Running on a Virtual Machine (VirtualBox)
 
-This app was designed to run on a Debian VM in VirtualBox and be reachable from your host and other LAN devices.
+This is a killer use case: getting files in and out of a VM without Samba, SSH, or shared-folder headaches.
 
 ### Option A — Bridged Adapter (recommended)
 
-VM Settings → Network → Attach to: **Bridged Adapter**.  
-The VM gets its own IP on your physical network; use that IP with port `5000` from other devices.
+1. VM Settings → Network → Attach to: **Bridged Adapter**
+2. Start the VM — it gets its own IP on your WiFi
+3. From your host or phone, open `http://<VM-IP>:5000`
 
-### Option B — NAT Network with port forwarding
+### Option B — NAT with Port Forwarding
 
-VM Settings → Network → Attach to: **NAT Network** → Port Forwarding → add a rule:
+1. VM Settings → Network → Attach to: **NAT Network** → Port Forwarding:
 
-| Field | Value |
-|-------|-------|
-| Name | FileManager |
-| Protocol | TCP |
-| Host IP | 127.0.0.1 |
-| Host Port | 5000 |
-| Guest IP | (leave empty) |
-| Guest Port | 5000 |
+   | Protocol | Host IP | Host Port | Guest Port |
+   |----------|---------|-----------|------------|
+   | TCP | 127.0.0.1 | 5000 | 5000 |
 
-Then allow the port through the VM firewall:
+2. Allow the port in the VM's firewall:
 
-```bash
-sudo ufw allow 5000/tcp
-```
+   ```bash
+   sudo ufw allow 5000/tcp
+   ```
+
+3. Open `http://127.0.0.1:5000` from your host machine.
 
 ---
 
-## Security
+## 🔒 A Word On Security
 
-⚠️ **This app is intended for trusted local networks only.** It has **no authentication** and exposes your filesystem.
+This is designed as a **personal, home-network tool** — it has **no login** by design, so anyone on your WiFi could access the files.
 
-Before exposing it beyond `localhost`:
+That's perfectly fine for:
 
-- Change `app.secret_key` in `app.py`
-- Add authentication (login middleware)
-- Serve over HTTPS (e.g., Nginx reverse proxy + Certbot)
-- Restrict allowed upload file types and sizes
-- Bind to `127.0.0.1` instead of `0.0.0.0` if you only need local access
+- ✅ Your home WiFi (family network)
+- ✅ A trusted VM setup
+- ✅ Quick personal file transfers
 
----
+Do **not** run it on:
 
-## Customization
+- ❌ Public WiFi (cafés, airports)
+- ❌ Networks with strangers on them
+- ❌ Port-forwarded to the internet
 
-- **Port:** Change `app.run(host='0.0.0.0', port=5000, debug=True)` in `app.py`
-- **Base directory:** Modify `BASE_DIR` / `HOME_DIR` at the top of `app.py`
-- **Styling:** Edit the CSS variables in the HTML templates (`:root` and `[data-theme="dark"]`)
-- **File-type icons:** Extend the extension maps in `index.html`
+**Hardening tips if you need them:** change `app.secret_key` in `app.py`, bind to `127.0.0.1` for local-only access, and put it behind an authenticating reverse proxy (e.g., Nginx) if you ever expose it beyond your network.
 
 ---
 
-## Roadmap
+## 🛠️ Customization
 
-- [ ] User authentication (login/password)
-- [ ] HTTPS deployment guide
-- [ ] Image/PDF preview in the browser
-- [ ] Copy/move files between directories
+- **Port:** change `port=5000` in the last line of `app.py`
+- **Theme & styling:** edit the CSS variables in the templates
+- **File-type icons:** extend the extension maps in the templates
+
+---
+
+## 🗺️ Roadmap
+
+- [ ] Login/password protection
+- [ ] Image, video, and PDF preview in the browser
+- [ ] Copy / move files between directories
 - [ ] Multi-select and bulk actions
-- [ ] File size and upload limits
+- [ ] Drag-and-drop uploads
 - [ ] Dockerfile for one-command deployment
 
 ---
 
-## Contributing
+## 🤝 Contributing
 
-This is a personal project, but suggestions and improvements are welcome.
+Suggestions and pull requests are welcome!
 
 1. Fork the repository
 2. Create a feature branch: `git checkout -b feature/your-feature`
-3. Commit your changes: `git commit -m "Add your feature"`
-4. Push to the branch: `git push origin feature/your-feature`
+3. Commit: `git commit -m "Add your feature"`
+4. Push: `git push origin feature/your-feature`
 5. Open a Pull Request
 
-Open an issue first to discuss new features or report bugs.
+Found a bug? Open an issue first so we can discuss it.
 
 ---
 
-## License
+## 📄 License
 
-This project is licensed under the MIT License. See the [LICENSE](LICENSE) file for details.
-
----
-
-## Author
-
-**Rakib** — Personal project  
-🔗 GitHub: https://github.com/YOUR_USERNAME
+MIT License — free to use, modify, and share. See the [LICENSE](LICENSE) file.
 
 ---
 
-_Made with ❤️ and Flask._
+## 👤 Author
+
+**Rakib** — Personal project
+🔗 GitHub: https://github.com/rakibhossain
+
+---
+
+_Made with ❤️ and Flask. Your files, your network, your cloud._
