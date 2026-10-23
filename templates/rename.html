@@ -31,11 +31,11 @@ h1 { font-size: 20px; margin-bottom: 16px; }
 <div class="container">
   <h1>&#9998; Rename</h1>
   <div class="breadcrumb">
-    <a href="/">Home</a>
-    {% if parent_path %}
-    <span> &rsaquo; </span><a href="/{{ parent_path }}">{{ parent_path }}</a>
-    {% endif %}
-    <span> &rsaquo; </span><span>{{ current_name }}</span>
+    <a href="{{ url_for('index') }}">Home</a>
+    {% for crumb in breadcrumbs %}
+    <span> &rsaquo; </span>
+    {% if crumb.url %}<a href="{{ crumb.url }}">{{ crumb.name }}</a>{% else %}<span>{{ crumb.name }}</span>{% endif %}
+    {% endfor %}
   </div>
 
   {% with messages = get_flashed_messages(with_categories=true) %}
@@ -53,7 +53,7 @@ h1 { font-size: 20px; margin-bottom: 16px; }
     </div>
     <div class="actions">
       <button type="submit" class="btn btn-primary">Rename</button>
-      <a href="/{{ parent_path }}" class="btn btn-cancel">Cancel</a>
+      <a href="{{ parent_url }}" class="btn btn-cancel">Cancel</a>
     </div>
   </form>
 </div>

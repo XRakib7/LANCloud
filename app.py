@@ -1,15 +1,49 @@
-import os
-import shutil
-import zipfile
-import io
 import mimetypes
+import os
+import ntpath
+import posixpath
+import re
+import secrets
+import shutil
+import socket
+import stat
+import string
+import tempfile
+import time
+import zipfile
 from datetime import datetime
-from flask import Flask, render_template, request, redirect, url_for, send_from_directory, flash, send_file
+
+from flask import (
+    Flask,
+    flash,
+    redirect,
+    render_template,
+    request,
+    send_file,
+    url_for,
+)
 
 app = Flask(__name__)
-app.secret_key = 'filemanager-secret-key-change-in-production'
-BASE_DIR = '/'
-HOME_DIR = os.path.expanduser('~')
+app.secret_key = os.environ.get('SECRET_KEY') or secrets.token_hex(32)
+
+IS_WINDOWS = os.name == 'nt'
+
+# On Windows we need ntpath (drive letters, backslashes). On Linux/macOS we
+# need posixpath. Keeping the module in one variable makes the path helpers
+# explicit and testable.
+pathmod = ntpath if IS_WINDOWS else posixpath
+
+HOME_DIR = pathmod.normpath(pathmod.abspath(os.path.expanduser('~')))
+APP_DIR = pathmod.normpath(pathmod.abspath(os.path.dirname(__file__)))
+
+DRIVE_PATH_RE = re.compile(r'^[A-Za-z]:')
+DRIVE_ONLY_RE = re.compile(r'^[A-Za-z]:$')
+INVALID_WINDOWS_NAME_RE = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
+WINDOWS_RESERVED_NAMES = {
+    'CON', 'PRN', 'AUX', 'NUL',
+    'COM1', 'COM2', 'COM3', 'COM4', 'COM5', 'COM6', 'COM7', 'COM8', 'COM9',
+    'LPT1', 'LPT2', 'LPT3', 'LPT4', 'LPT5', 'LPT6', 'LPT7', 'LPT8', 'LPT9',
+}
 
 TEXT_EXTENSIONS = {
     '.txt', '.md', '.rst', '.py', '.js', '.ts', '.jsx', '.tsx', '.html', '.htm',
@@ -17,7 +51,8 @@ TEXT_EXTENSIONS = {
     '.cfg', '.conf', '.sh', '.bash', '.zsh', '.env', '.gitignore', '.gitkeep',
     '.csv', '.log', '.sql', '.rb', '.php', '.go', '.rs', '.java', '.c', '.cpp',
     '.h', '.hpp', '.swift', '.kt', '.scala', '.pl', '.lua', '.r', '.m', '.mm',
-    '.dockerfile', '.makefile', '.gradle', '.lock', '.patch', '.diff',
+    '.dockerfile', '.makefile', '.gradle', '.lock', '.patch', '.diff', '.bat',
+    '.cmd', '.ps1', '.vbs', '.reg',
 }
 
 IMAGE_EXTENSIONS = {'.jpg', '.jpeg', '.png', '.gif', '.bmp', '.svg', '.webp', '.ico', '.tiff', '.avif'}
@@ -29,31 +64,327 @@ CODE_EXTENSIONS = {
     '.py', '.js', '.ts', '.jsx', '.tsx', '.html', '.css', '.scss', '.less',
     '.json', '.xml', '.yaml', '.yml', '.toml', '.ini', '.cfg', '.conf', '.sh',
     '.bash', '.zsh', '.sql', '.rb', '.php', '.go', '.rs', '.java', '.c', '.cpp',
-    '.h', '.hpp', '.swift', '.kt', '.scala', '.pl', '.lua', '.r',
+    '.h', '.hpp', '.swift', '.kt', '.scala', '.pl', '.lua', '.r', '.bat',
+    '.cmd', '.ps1',
 }
 
+# Directory sizes are expensive to calculate (especially C:\Windows or a home
+# folder with node_modules). We keep a small time budget per page load instead
+# of freezing the page.
+SIZE_SCAN_BUDGET = 0.5
+SIZE_SCAN_MAX_ENTRIES = 5000
+
+
+# ---------------------------------------------------------------------------
+# Path translation
+#
+# The browser should never see OS-specific paths. Every link uses a "virtual"
+# path made of forward slashes:
+#   Linux/macOS:  home/rakib/Documents        (relative to /)
+#   Windows:      C:/Users/Rakib/Documents    (includes the drive)
+#
+# This is what fixes Windows. The old code always assumed '/' meant the root
+# of the current drive, which breaks when the project and the home folder are
+# on different drives.
+# ---------------------------------------------------------------------------
+
+def normalize_virtual(subpath):
+    """Return a clean, URL-safe virtual path (no leading slash)."""
+    if not subpath:
+        return ''
+
+    value = str(subpath).replace('\\', '/').strip()
+    value = re.sub(r'/+', '/', value)
+
+    if IS_WINDOWS:
+        value = value.lstrip('/')
+
+    parts = []
+    for part in value.split('/'):
+        if part in ('', '.'):
+            continue
+        if part == '..':
+            # Never pop a drive root ("C:").
+            if parts and not DRIVE_ONLY_RE.match(parts[-1]):
+                parts.pop()
+            continue
+        parts.append(part)
+
+    return '/'.join(parts)
+
+
+def abs_path_from_virtual(subpath):
+    """Turn a virtual path into a real absolute OS path."""
+    # '/' is used internally by the POSIX root view and by upload forms.
+    if subpath == '/':
+        return pathmod.normpath(pathmod.abspath(os.sep))
+
+    value = normalize_virtual(subpath)
+    if not value:
+        return HOME_DIR
+
+    if IS_WINDOWS:
+        if DRIVE_ONLY_RE.match(value):
+            value += '\\'
+        if DRIVE_PATH_RE.match(value):
+            return pathmod.normpath(pathmod.abspath(value))
+
+        # A path without a drive is relative to the drive that contains the
+        # user's home directory, not to the process's current directory.
+        drive = pathmod.splitdrive(HOME_DIR)[0]
+        base = drive + pathmod.sep
+        return pathmod.normpath(pathmod.abspath(pathmod.join(base, value)))
+
+    return pathmod.normpath(pathmod.abspath('/' + value))
+
+
+def virtual_path_from_abs(abs_path):
+    """Turn a real absolute OS path into a URL-safe virtual path."""
+    path = pathmod.normpath(pathmod.abspath(abs_path))
+
+    if IS_WINDOWS:
+        drive, rest = pathmod.splitdrive(path)
+        rest = rest.replace('\\', '/').strip('/')
+        return drive + ('/' + rest if rest else '')
+
+    return path.replace('\\', '/').lstrip('/')
+
+
+def same_path(first, second):
+    return (
+        pathmod.normcase(pathmod.normpath(first))
+        == pathmod.normcase(pathmod.normpath(second))
+    )
+
+
+def is_drive_root(path):
+    if not IS_WINDOWS:
+        return False
+    drive, tail = pathmod.splitdrive(pathmod.normpath(path))
+    return bool(drive) and tail in ('', '/', '\\')
+
+
+def url_for_dir(abs_path):
+    """Build the list-page URL for a directory, including root/drive roots."""
+    if same_path(abs_path, HOME_DIR):
+        return url_for('index')
+
+    virtual = virtual_path_from_abs(abs_path)
+    if virtual:
+        return url_for('index', subpath=virtual)
+
+    # POSIX filesystem root. '' means "home", so use ?root instead.
+    return url_for('index', root=1)
+
+
+def build_breadcrumbs(current_abs, current_virtual):
+    """Return crumbs as {name, url}. The last crumb is the current folder."""
+    if same_path(current_abs, HOME_DIR):
+        return []
+
+    # Inside the home folder: show Home > Documents > Work (not every path
+    # component from the drive root).
+    try:
+        rel = pathmod.relpath(current_abs, HOME_DIR)
+    except ValueError:
+        rel = None
+
+    if rel is not None and rel != '.':
+        rel_parts = [p for p in rel.replace('\\', '/').split('/') if p]
+        if '..' not in rel_parts and not pathmod.isabs(rel):
+            home_virtual = virtual_path_from_abs(HOME_DIR)
+            acc_parts = [p for p in home_virtual.split('/') if p]
+            crumbs = []
+            for index, part in enumerate(rel_parts):
+                acc_parts.append(part)
+                acc = '/'.join(acc_parts)
+                is_last = index == len(rel_parts) - 1
+                crumbs.append({
+                    'name': part,
+                    'url': None if is_last else url_for('index', subpath=acc),
+                })
+            return crumbs
+
+    # Outside home: show drive/root and every component.
+    parts = [p for p in current_virtual.split('/') if p]
+    crumbs = []
+
+    if IS_WINDOWS:
+        if parts:
+            crumbs.append({
+                'name': parts[0],
+                'url': None if len(parts) == 1 else url_for('index', subpath=parts[0]),
+            })
+            start = 1
+        else:
+            start = 0
+    else:
+        crumbs.append({
+            'name': 'Root',
+            'url': None if not parts else url_for('index', root=1),
+        })
+        start = 0
+
+    for index in range(start, len(parts)):
+        acc = '/'.join(parts[:index + 1])
+        is_last = index == len(parts) - 1
+        crumbs.append({
+            'name': parts[index],
+            'url': None if is_last else url_for('index', subpath=acc),
+        })
+
+    return crumbs
+
+
+def is_protected_path(abs_path):
+    """Never let the UI delete or rename the home folder or a filesystem root."""
+    protected = [HOME_DIR, APP_DIR]
+
+    if IS_WINDOWS:
+        protected.extend(drive + '\\' for drive in windows_drives())
+    else:
+        protected.append(pathmod.abspath(os.sep))
+
+    return any(same_path(abs_path, item) for item in protected)
+
+
+def windows_drives():
+    """Return available Windows drive roots such as ['C:', 'D:']."""
+    if not IS_WINDOWS:
+        return []
+
+    drives = []
+    try:
+        import ctypes
+        bitmask = ctypes.windll.kernel32.GetLogicalDrives()
+        for index in range(26):
+            if bitmask & (1 << index):
+                drives.append(chr(ord('A') + index) + ':')
+    except Exception:
+        for letter in string.ascii_uppercase:
+            root = letter + ':\\'
+            if os.path.exists(root):
+                drives.append(letter + ':')
+
+    return drives
+
+
+# ---------------------------------------------------------------------------
+# Upload-name sanitising (preserves spaces/unicode, unlike secure_filename)
+# ---------------------------------------------------------------------------
+
+def clean_path_component(name):
+    name = str(name or '').replace('\x00', '').strip()
+    if name in ('', '.', '..'):
+        return None
+
+    if IS_WINDOWS:
+        name = name.rstrip(' .')
+        if not name:
+            return None
+        name = INVALID_WINDOWS_NAME_RE.sub('_', name)
+        stem = name.split('.')[0].upper()
+        if stem in WINDOWS_RESERVED_NAMES:
+            name = '_' + name
+    return name
+
+
+def clean_upload_filename(name):
+    """Keep only the file name; browsers may send C:\\fakepath\\file.txt."""
+    value = str(name or '').replace('\\', '/')
+    parts = [part for part in value.split('/') if part not in ('', '.')]
+    if not parts or '..' in parts:
+        return None
+    return clean_path_component(parts[-1])
+
+
+def clean_upload_relative_path(name):
+    """Sanitise a browser folder-upload path (Folder/sub/file.txt)."""
+    value = str(name or '').replace('\\', '/')
+    if value.startswith('/') or DRIVE_PATH_RE.match(value):
+        return None
+
+    parts = []
+    for part in value.split('/'):
+        if part in ('', '.'):
+            continue
+        if part == '..':
+            return None
+        cleaned = clean_path_component(part)
+        if not cleaned:
+            return None
+        parts.append(cleaned)
+    return parts
+
+
+def windows_name_error(name):
+    """Return a user-facing error for names Windows cannot store."""
+    if not IS_WINDOWS:
+        return None
+    if INVALID_WINDOWS_NAME_RE.search(name):
+        return 'That name contains characters Windows does not allow: < > : " / \\ | ? *'
+    if name.rstrip(' .') != name:
+        return 'Windows does not allow names ending with a space or a dot'
+    if name.split('.')[0].upper() in WINDOWS_RESERVED_NAMES:
+        return 'That name is reserved by Windows (e.g. CON, NUL, COM1)'
+    return None
+
+
+# ---------------------------------------------------------------------------
+# Misc helpers
+# ---------------------------------------------------------------------------
 
 def format_size(size_bytes):
+    if size_bytes is None:
+        return '\u2014'
     if size_bytes < 1024:
         return f'{size_bytes} B'
-    elif size_bytes < 1024 * 1024:
+    if size_bytes < 1024 * 1024:
         return f'{size_bytes / 1024:.1f} KB'
-    elif size_bytes < 1024 * 1024 * 1024:
+    if size_bytes < 1024 * 1024 * 1024:
         return f'{size_bytes / (1024 * 1024):.1f} MB'
-    else:
-        return f'{size_bytes / (1024 * 1024 * 1024):.2f} GB'
+    return f'{size_bytes / (1024 * 1024 * 1024):.2f} GB'
 
 
-def get_dir_size(path):
-    total = 0
+def is_redirected_dir(path):
+    """True for symlinks and Windows junctions/reparse points."""
+    if os.path.islink(path):
+        return True
     try:
-        for dirpath, dirnames, filenames in os.walk(path):
-            for f in filenames:
+        if os.path.isjunction(path):
+            return True
+    except AttributeError:
+        pass
+    try:
+        attrs = os.stat(path, follow_symlinks=False).st_file_attributes
+        return bool(attrs & stat.FILE_ATTRIBUTE_REPARSE_POINT)
+    except (AttributeError, OSError):
+        return False
+
+
+def get_dir_size(path, deadline=None, max_entries=SIZE_SCAN_MAX_ENTRIES):
+    """Return a folder size, or None when the scan would be too expensive."""
+    total = 0
+    count = 0
+    try:
+        for dirpath, dirnames, filenames in os.walk(path, followlinks=False):
+            if deadline is not None and time.monotonic() >= deadline:
+                return None
+
+            # Do not walk into junctions/symlinks (avoids loops on Windows).
+            dirnames[:] = [
+                name for name in dirnames
+                if not is_redirected_dir(os.path.join(dirpath, name))
+            ]
+
+            for filename in filenames:
                 try:
-                    fp = os.path.join(dirpath, f)
-                    total += os.path.getsize(fp)
+                    total += os.path.getsize(os.path.join(dirpath, filename))
                 except OSError:
                     pass
+                count += 1
+                if count >= max_entries:
+                    return None
     except OSError:
         pass
     return total
@@ -84,208 +415,334 @@ def is_text_file(filename):
     ext = os.path.splitext(filename)[1].lower()
     if ext in TEXT_EXTENSIONS or ext in CODE_EXTENSIONS:
         return True
-    mt = mimetypes.guess_type(filename)[0]
-    if mt and mt.startswith('text/'):
-        return True
-    return False
+    guessed = mimetypes.guess_type(filename)[0]
+    return bool(guessed and guessed.startswith('text/'))
 
 
-def get_safe_path(subpath):
-    if subpath is None or subpath == '':
-        return HOME_DIR
-    full_path = os.path.abspath('/' + subpath.lstrip('/'))
-    return full_path
+def make_item(name, item_path, is_dir, deadline, is_drive=False):
+    virtual = virtual_path_from_abs(item_path)
+    modified = None
+    stat_result = None
+
+    try:
+        stat_result = os.stat(item_path)
+        modified = datetime.fromtimestamp(stat_result.st_mtime)
+    except (OSError, ValueError, OverflowError):
+        pass
+
+    if is_drive:
+        size_value = 0
+        size_text = '\u2014'
+        try:
+            usage = shutil.disk_usage(item_path)
+            size_value = usage.total
+            size_text = f'{format_size(usage.free)} free'
+        except OSError:
+            pass
+        file_type = 'Drive'
+        is_text = False
+    elif is_dir:
+        size_value = 0
+        size_text = '\u2014'
+        computed = get_dir_size(item_path, deadline=deadline)
+        if computed is not None:
+            size_value = computed
+            size_text = format_size(computed)
+        file_type = 'Folder'
+        is_text = False
+    else:
+        size_value = stat_result.st_size if stat_result is not None else 0
+        size_text = format_size(stat_result.st_size) if stat_result is not None else '\u2014'
+        file_type = get_file_type(name, False)
+        is_text = is_text_file(name)
+
+    item = {
+        'name': name,
+        'path': virtual,
+        'is_dir': is_dir,
+        'is_drive': is_drive,
+        'size': size_value,
+        'size_display': size_text,
+        'modified': modified.strftime('%Y-%m-%d %H:%M') if modified else '\u2014',
+        'modified_sort': modified.timestamp() if modified else 0,
+        'file_type': file_type,
+        'is_text': is_text,
+        'url': (
+            url_for('index', subpath=virtual)
+            if is_dir else url_for('download', filename=virtual)
+        ),
+        'download_url': url_for('download', filename=virtual),
+        'edit_url': url_for('edit', filename=virtual) if is_text and not is_dir else None,
+        'rename_url': None if is_drive else url_for('rename', filename=virtual),
+        'delete_url': None if is_drive else url_for('delete', filename=virtual),
+    }
+    return item
 
 
-def get_relative_path(abs_path):
-    rel = os.path.relpath(abs_path, '/')
-    if rel == '.':
-        return ''
-    return rel
+def redirect_to_dir(abs_path):
+    return redirect(url_for_dir(abs_path))
+
+
+# ---------------------------------------------------------------------------
+# Routes
+# ---------------------------------------------------------------------------
+
+@app.route('/favicon.ico')
+def favicon():
+    return '', 204
 
 
 @app.route('/')
 @app.route('/<path:subpath>')
 def index(subpath=''):
-    if 'root' in request.args:
-        safe_path = '/'
+    show_root = 'root' in request.args
+    drive_view = False
+
+    if show_root:
+        if IS_WINDOWS:
+            drive_view = True
+            target_abs = None
+            current_virtual = ''
+            form_path = ''
+        else:
+            target_abs = pathmod.normpath(pathmod.abspath(os.sep))
+            current_virtual = ''
+            form_path = '/'
     else:
-        safe_path = get_safe_path(subpath)
-    if safe_path is None or not os.path.exists(safe_path):
-        flash('Invalid path', 'error')
-        return redirect(url_for('index'))
+        current_virtual = normalize_virtual(subpath)
+        target_abs = abs_path_from_virtual(current_virtual)
+        form_path = current_virtual
 
     items = []
+
+    if drive_view:
+        deadline = time.monotonic() + SIZE_SCAN_BUDGET
+        for drive in windows_drives():
+            items.append(make_item(drive + pathmod.sep, drive + pathmod.sep, True, deadline, is_drive=True))
+
+        return render_template(
+            'index.html',
+            items=items,
+            current_path=form_path,
+            form_path=form_path,
+            current_abs_path='This PC',
+            parent_url=None,
+            breadcrumbs=[{'name': 'This PC', 'url': None}],
+            at_home=False,
+            drive_view=True,
+        )
+
+    if not os.path.exists(target_abs):
+        flash(f'Path not found: {current_virtual or target_abs}', 'error')
+        return redirect(url_for('index'))
+
+    if not os.path.isdir(target_abs):
+        flash('That path is not a folder', 'error')
+        parent = pathmod.dirname(target_abs)
+        if same_path(parent, target_abs):
+            return redirect(url_for('index'))
+        return redirect_to_dir(parent)
+
+    deadline = time.monotonic() + SIZE_SCAN_BUDGET
+
     try:
-        for item in sorted(os.listdir(safe_path), key=lambda x: x.lower()):
-            item_path = os.path.join(safe_path, item)
+        names = sorted(os.listdir(target_abs), key=lambda name: name.lower())
+    except OSError as exc:
+        names = []
+        flash(f'Cannot open this folder: {exc.strerror or exc}', 'error')
+
+    for name in names:
+        item_path = pathmod.join(target_abs, name)
+        try:
             is_dir = os.path.isdir(item_path)
-            rel_path = os.path.relpath(item_path, '/')
-            try:
-                st = os.stat(item_path)
-                modified = datetime.fromtimestamp(st.st_mtime)
-            except OSError:
-                modified = datetime.now()
+        except OSError:
+            is_dir = False
+        items.append(make_item(name, item_path, is_dir, deadline))
 
-            if is_dir:
-                dir_size = get_dir_size(item_path)
-                size_val = dir_size
-                size_text = format_size(dir_size) if dir_size > 0 else '0 B'
-            else:
-                size_val = st.st_size
-                size_text = format_size(st.st_size)
+    items.sort(key=lambda item: (not item['is_dir'], item['name'].lower()))
 
-            items.append({
-                'name': item,
-                'path': rel_path,
-                'is_dir': is_dir,
-                'size': size_val,
-                'size_display': size_text,
-                'modified': modified.strftime('%Y-%m-%d %H:%M'),
-                'modified_sort': modified.timestamp(),
-                'file_type': get_file_type(item, is_dir),
-                'is_text': is_text_file(item) if not is_dir else False,
-            })
-    except PermissionError:
-        flash('Permission denied for this directory', 'error')
+    parent_url = None
+    parent_abs = pathmod.dirname(target_abs)
+    if not same_path(parent_abs, target_abs):
+        parent_url = url_for_dir(parent_abs)
 
-    items.sort(key=lambda x: (not x['is_dir'], x['name'].lower()))
+    at_home = same_path(target_abs, HOME_DIR)
 
-    # Build breadcrumb trail
-    breadcrumbs = []
-    if subpath:
-        parts = subpath.split('/')
-        acc = ''
-        for p in parts:
-            acc = os.path.join(acc, p) if acc else p
-            breadcrumbs.append({'name': p, 'path': acc})
-
-    # No parent when at home page (showing HOME_DIR)
-    if not subpath:
-        parent_path = None
-    else:
-        parent_abs = os.path.dirname('/' + subpath.rstrip('/').lstrip('/'))
-        if parent_abs == '/':
-            parent_path = ''
-        else:
-            parent_path = parent_abs.lstrip('/')
-
-    return render_template('index.html',
-                           items=items,
-                           current_path=subpath or '',
-                           parent_path=parent_path,
-                           current_abs_path=safe_path,
-                           breadcrumbs=breadcrumbs)
+    return render_template(
+        'index.html',
+        items=items,
+        current_path=form_path,
+        form_path=form_path,
+        current_abs_path=target_abs,
+        parent_url=parent_url,
+        breadcrumbs=build_breadcrumbs(target_abs, current_virtual),
+        at_home=at_home,
+        drive_view=False,
+    )
 
 
 @app.route('/upload', methods=['POST'])
 def upload():
-    if 'file' not in request.files:
-        flash('No file selected', 'error')
-        return redirect(request.referrer or url_for('index'))
+    target_path = request.form.get('target_path', '')
+    safe_path = abs_path_from_virtual(target_path)
+
+    if not os.path.isdir(safe_path):
+        flash('Invalid target directory', 'error')
+        return redirect(url_for('index'))
 
     files = request.files.getlist('file')
-    target_path = request.form.get('target_path', '')
-    safe_path = get_safe_path(target_path)
-    if safe_path is None or not os.path.isdir(safe_path):
-        flash('Invalid target directory', 'error')
-        return redirect(request.referrer or url_for('index'))
+    if not files:
+        flash('No file selected', 'error')
+        return redirect_to_dir(safe_path)
 
     uploaded = 0
-    for f in files:
-        if f.filename == '':
+    for uploaded_file in files:
+        if not uploaded_file.filename:
             continue
-        try:
-            f.save(os.path.join(safe_path, f.filename))
-            uploaded += 1
-        except Exception as e:
-            flash(f'Error uploading {f.filename}: {str(e)}', 'error')
 
-    if uploaded > 0:
+        filename = clean_upload_filename(uploaded_file.filename)
+        if not filename:
+            flash(f'Skipped a file with an invalid name: {uploaded_file.filename}', 'error')
+            continue
+
+        destination = pathmod.join(safe_path, filename)
+        try:
+            uploaded_file.save(destination)
+            uploaded += 1
+        except OSError as exc:
+            flash(f'Error uploading {filename}: {exc}', 'error')
+
+    if uploaded:
         flash(f'{uploaded} file(s) uploaded successfully', 'success')
 
-    return redirect(url_for('index', subpath=target_path) if target_path else url_for('index'))
+    return redirect_to_dir(safe_path)
 
 
 @app.route('/upload_folder', methods=['POST'])
 def upload_folder():
-    if 'folder' not in request.files:
-        flash('No folder selected', 'error')
-        return redirect(request.referrer or url_for('index'))
+    target_path = request.form.get('target_path', '')
+    safe_path = abs_path_from_virtual(target_path)
+
+    if not os.path.isdir(safe_path):
+        flash('Invalid target directory', 'error')
+        return redirect(url_for('index'))
 
     files = request.files.getlist('folder')
-    target_path = request.form.get('target_path', '')
-    safe_path = get_safe_path(target_path)
-    if safe_path is None or not os.path.isdir(safe_path):
-        flash('Invalid target directory', 'error')
-        return redirect(request.referrer or url_for('index'))
+    if not files:
+        flash('No folder selected', 'error')
+        return redirect_to_dir(safe_path)
 
     count = 0
-    for f in files:
-        if f.filename == '':
+    for uploaded_file in files:
+        if not uploaded_file.filename:
             continue
-        rel_path = f.filename
-        abs_path = os.path.join(safe_path, rel_path)
-        os.makedirs(os.path.dirname(abs_path), exist_ok=True)
-        try:
-            f.save(abs_path)
-            count += 1
-        except Exception as e:
-            flash(f'Error saving {rel_path}: {str(e)}', 'error')
 
-    if count > 0:
+        parts = clean_upload_relative_path(uploaded_file.filename)
+        if not parts:
+            flash(f'Skipped an unsafe path: {uploaded_file.filename}', 'error')
+            continue
+
+        destination = pathmod.join(safe_path, *parts)
+        try:
+            parent = pathmod.dirname(destination)
+            if parent:
+                os.makedirs(parent, exist_ok=True)
+            uploaded_file.save(destination)
+            count += 1
+        except OSError as exc:
+            flash(f'Error saving {"/".join(parts)}: {exc}', 'error')
+
+    if count:
         flash(f'Folder uploaded ({count} files)', 'success')
 
-    return redirect(url_for('index', subpath=target_path) if target_path else url_for('index'))
+    return redirect_to_dir(safe_path)
 
 
 @app.route('/download/<path:filename>')
 def download(filename):
-    safe_path = get_safe_path(filename)
-    if safe_path is None or not os.path.exists(safe_path):
+    safe_path = abs_path_from_virtual(filename)
+
+    if not os.path.exists(safe_path):
         flash('File not found', 'error')
         return redirect(url_for('index'))
 
     if os.path.isdir(safe_path):
-        return download_folder(filename)
+        return download_folder(safe_path)
 
-    directory = os.path.dirname(safe_path)
-    basename = os.path.basename(safe_path)
-    return send_from_directory(directory, basename, as_attachment=True)
+    try:
+        return send_file(safe_path, as_attachment=True, download_name=os.path.basename(safe_path))
+    except OSError as exc:
+        flash(f'Cannot download this file: {exc}', 'error')
+        return redirect_to_dir(pathmod.dirname(safe_path))
 
 
-def download_folder(folderpath):
-    safe_path = get_safe_path(folderpath)
-    if safe_path is None or not os.path.isdir(safe_path):
+def _remove_quietly(path):
+    try:
+        os.unlink(path)
+    except OSError:
+        pass
+
+
+def download_folder(safe_path):
+    if not os.path.isdir(safe_path):
         flash('Folder not found', 'error')
         return redirect(url_for('index'))
 
-    memory_file = io.BytesIO()
-    with zipfile.ZipFile(memory_file, 'w', zipfile.ZIP_DEFLATED) as zipf:
-        for root, dirs, files in os.walk(safe_path):
-            for f in files:
-                fp = os.path.join(root, f)
-                arcname = os.path.relpath(fp, safe_path)
-                try:
-                    zipf.write(fp, arcname)
-                except OSError:
-                    pass
+    temp_file = tempfile.NamedTemporaryFile(prefix='lancloud_', suffix='.zip', delete=False)
+    temp_name = temp_file.name
+    temp_file.close()
+    temp_norm = os.path.normcase(os.path.abspath(temp_name))
 
-    memory_file.seek(0)
-    folder_name = os.path.basename(safe_path) or 'folder'
-    return send_file(memory_file, mimetype='application/zip',
-                     as_attachment=True, download_name=f'{folder_name}.zip')
+    try:
+        with zipfile.ZipFile(temp_name, 'w', zipfile.ZIP_DEFLATED, allowZip64=True) as archive:
+            for root, dirs, files in os.walk(safe_path):
+                dirs[:] = [name for name in dirs if not is_redirected_dir(os.path.join(root, name))]
+                for name in files:
+                    full_path = os.path.join(root, name)
+                    # The ZIP itself can live inside the folder being zipped
+                    # (Windows temp is under C:\Users\...). Never include it.
+                    if os.path.normcase(os.path.abspath(full_path)) == temp_norm:
+                        continue
+                    arcname = os.path.relpath(full_path, safe_path).replace('\\', '/')
+                    try:
+                        archive.write(full_path, arcname)
+                    except OSError:
+                        pass
+    except OSError as exc:
+        _remove_quietly(temp_name)
+        flash(f'Could not create ZIP: {exc}', 'error')
+        return redirect_to_dir(safe_path)
+
+    clean_path = safe_path.rstrip('/\\')
+    folder_name = pathmod.basename(clean_path)
+    if not folder_name:
+        drive = pathmod.splitdrive(clean_path)[0].replace(':', '')
+        folder_name = f'{drive}_drive' if drive else 'folder'
+
+    response = send_file(
+        temp_name,
+        mimetype='application/zip',
+        as_attachment=True,
+        download_name=f'{folder_name}.zip',
+    )
+    response.call_on_close(lambda: _remove_quietly(temp_name))
+    return response
 
 
 @app.route('/delete/<path:filename>', methods=['POST'])
 def delete(filename):
-    safe_path = get_safe_path(filename)
-    if safe_path is None:
-        flash('Invalid path', 'error')
+    safe_path = abs_path_from_virtual(filename)
+
+    if is_protected_path(safe_path):
+        flash('Refusing to delete a protected system location', 'error')
+        return redirect(url_for('index'))
+
+    if not os.path.exists(safe_path):
+        flash('File or directory not found', 'error')
         return redirect(url_for('index'))
 
     try:
-        if os.path.isfile(safe_path):
+        if os.path.isfile(safe_path) or os.path.islink(safe_path):
             os.remove(safe_path)
             flash(f'Deleted: {os.path.basename(safe_path)}', 'success')
         elif os.path.isdir(safe_path):
@@ -293,119 +750,182 @@ def delete(filename):
             flash(f'Deleted folder: {os.path.basename(safe_path)}', 'success')
         else:
             flash('File or directory not found', 'error')
-    except OSError as e:
-        flash(f'Error deleting: {str(e)}', 'error')
+    except OSError as exc:
+        flash(f'Error deleting: {exc}', 'error')
 
-    parent = os.path.dirname(filename) if filename else ''
-    return redirect(url_for('index', subpath=parent) if parent else url_for('index'))
+    parent = pathmod.dirname(safe_path)
+    if same_path(parent, safe_path):
+        return redirect(url_for('index'))
+    return redirect_to_dir(parent)
 
 
 @app.route('/rename/<path:filename>', methods=['GET', 'POST'])
 def rename(filename):
-    safe_path = get_safe_path(filename)
-    if safe_path is None:
-        flash('Invalid path', 'error')
-        return redirect(url_for('index'))
+    safe_path = abs_path_from_virtual(filename)
+
     if not os.path.exists(safe_path):
         flash('File or directory not found', 'error')
         return redirect(url_for('index'))
 
-    current_name = os.path.basename(safe_path)
-    parent_dir = os.path.dirname(safe_path)
-    parent_rel = get_relative_path(parent_dir)
+    if is_protected_path(safe_path):
+        flash('Refusing to rename a protected system location', 'error')
+        return redirect(url_for('index'))
+
+    current_name = os.path.basename(safe_path.rstrip('/\\')) or safe_path
+    parent_dir = pathmod.dirname(safe_path)
+    parent_url = url_for_dir(parent_dir)
 
     if request.method == 'POST':
         new_name = request.form.get('new_name', '').strip()
+
         if not new_name:
             flash('New name is required', 'error')
             return redirect(request.url)
 
-        new_path = os.path.join(parent_dir, new_name)
-        new_rel = get_relative_path(new_path)
+        if new_name in ('.', '..') or '/' in new_name or '\\' in new_name:
+            flash('A name cannot contain / or \\', 'error')
+            return redirect(request.url)
 
-        if not new_rel.startswith(get_relative_path(parent_dir)) and new_rel != '':
+        name_error = windows_name_error(new_name)
+        if name_error:
+            flash(name_error, 'error')
+            return redirect(request.url)
+
+        new_path = pathmod.join(parent_dir, new_name)
+        if not same_path(pathmod.dirname(new_path), parent_dir):
             flash('Invalid new name', 'error')
             return redirect(request.url)
 
         try:
             os.rename(safe_path, new_path)
             flash(f'Renamed to {new_name}', 'success')
-            return redirect(url_for('index', subpath=parent_rel))
-        except OSError as e:
-            flash(f'Error renaming: {str(e)}', 'error')
+            return redirect_to_dir(parent_dir)
+        except OSError as exc:
+            flash(f'Error renaming: {exc}', 'error')
             return redirect(request.url)
 
-    return render_template('rename.html', filename=filename,
-                           current_name=current_name, parent_path=parent_rel)
+    return render_template(
+        'rename.html',
+        filename=virtual_path_from_abs(safe_path),
+        current_name=current_name,
+        parent_url=parent_url,
+        breadcrumbs=build_breadcrumbs(safe_path, virtual_path_from_abs(safe_path)),
+        at_home=False,
+    )
 
 
 @app.route('/edit/<path:filename>', methods=['GET', 'POST'])
 def edit(filename):
-    safe_path = get_safe_path(filename)
-    if safe_path is None or not os.path.isfile(safe_path):
-        flash('File not found', 'error')
-        return redirect(url_for('index'))
+    safe_path = abs_path_from_virtual(filename)
 
-    try:
-        with open(safe_path, 'r', encoding='utf-8', errors='replace') as f:
-            content = f.read()
-    except Exception as e:
-        flash(f'Error reading file: {str(e)}', 'error')
+    if not os.path.isfile(safe_path):
+        flash('File not found', 'error')
         return redirect(url_for('index'))
 
     if request.method == 'POST':
         new_content = request.form.get('content', '')
         try:
-            with open(safe_path, 'w', encoding='utf-8') as f:
-                f.write(new_content)
+            with open(safe_path, 'w', encoding='utf-8', errors='replace', newline='') as handle:
+                handle.write(new_content)
             flash('File saved successfully', 'success')
-            parent = os.path.dirname(filename) if os.path.dirname(filename) else ''
-            return redirect(url_for('index', subpath=parent))
-        except Exception as e:
-            flash(f'Error saving file: {str(e)}', 'error')
+            return redirect_to_dir(pathmod.dirname(safe_path))
+        except OSError as exc:
+            flash(f'Error saving file: {exc}', 'error')
 
-    return render_template('edit.html', filename=filename, content=content)
+    try:
+        with open(safe_path, 'r', encoding='utf-8', errors='replace', newline='') as handle:
+            content = handle.read()
+    except OSError as exc:
+        flash(f'Error reading file: {exc}', 'error')
+        return redirect(url_for('index'))
+
+    virtual = virtual_path_from_abs(safe_path)
+    return render_template(
+        'edit.html',
+        filename=virtual,
+        display_name=os.path.basename(safe_path),
+        content=content,
+        parent_url=url_for_dir(pathmod.dirname(safe_path)),
+        breadcrumbs=build_breadcrumbs(safe_path, virtual),
+        at_home=False,
+    )
 
 
 @app.route('/new_folder', methods=['POST'])
 def new_folder():
     folder_name = request.form.get('folder_name', '').strip()
     target_path = request.form.get('target_path', '')
+    safe_path = abs_path_from_virtual(target_path)
+
+    if not os.path.isdir(safe_path):
+        flash('Invalid target directory', 'error')
+        return redirect(url_for('index'))
 
     if not folder_name:
         flash('Folder name is required', 'error')
-        return redirect(request.referrer or url_for('index'))
+        return redirect_to_dir(safe_path)
 
-    safe_path = get_safe_path(target_path)
-    if safe_path is None or not os.path.isdir(safe_path):
-        flash('Invalid target directory', 'error')
-        return redirect(request.referrer or url_for('index'))
+    if folder_name in ('.', '..') or '/' in folder_name or '\\' in folder_name:
+        flash('A folder name cannot contain / or \\', 'error')
+        return redirect_to_dir(safe_path)
 
-    new_path = os.path.join(safe_path, folder_name)
+    name_error = windows_name_error(folder_name)
+    if name_error:
+        flash(name_error, 'error')
+        return redirect_to_dir(safe_path)
+
+    new_path = pathmod.join(safe_path, folder_name)
     try:
         os.mkdir(new_path)
         flash(f'Folder "{folder_name}" created', 'success')
     except FileExistsError:
         flash('Folder already exists', 'error')
-    except Exception as e:
-        flash(f'Error: {str(e)}', 'error')
+    except OSError as exc:
+        flash(f'Error: {exc}', 'error')
 
-    return redirect(url_for('index', subpath=target_path) if target_path else url_for('index'))
+    return redirect_to_dir(safe_path)
+
+
+# ---------------------------------------------------------------------------
+# Startup
+# ---------------------------------------------------------------------------
+
+def get_lan_ip():
+    try:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        try:
+            sock.connect(('8.8.8.8', 80))
+            return sock.getsockname()[0]
+        finally:
+            sock.close()
+    except OSError:
+        try:
+            return socket.gethostbyname(socket.gethostname())
+        except OSError:
+            return '127.0.0.1'
+
+
+def get_port():
+    try:
+        return int(os.environ.get('PORT', '5000'))
+    except ValueError:
+        return 5000
 
 
 if __name__ == '__main__':
-    import socket
-    try:
-        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        s.connect(('8.8.8.8', 80))
-        ip = s.getsockname()[0]
-        s.close()
-    except OSError:
-        ip = '127.0.0.1'
+    host = os.environ.get('HOST', '0.0.0.0')
+    port = get_port()
+    debug = os.environ.get('FLASK_DEBUG', '').lower() in ('1', 'true', 'yes', 'on')
+    lan_ip = get_lan_ip()
 
-    print(f'Online File Manager running at:')
-    print(f'  Local:   http://127.0.0.1:5000')
-    print(f'  Network: http://{ip}:5000')
+    print('LANCloud is running:')
+    print(f'  Local:   http://127.0.0.1:{port}')
+    print(f'  Network: http://{lan_ip}:{port}')
     print(f'  Home:    {HOME_DIR}')
-    print(f'  Root:    {BASE_DIR}')
-    app.run(host='0.0.0.0', port=5000, debug=True)
+    print(f'  Root:    {"This PC (all drives)" if IS_WINDOWS else "/"}')
+    if IS_WINDOWS:
+        print('  Tip:     If other devices cannot connect, allow Python through')
+        print('           Windows Firewall on Private networks (see README).')
+    print('  Stop:    Ctrl+C')
+
+    app.run(host=host, port=port, debug=debug)

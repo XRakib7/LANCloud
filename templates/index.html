@@ -222,7 +222,7 @@ tbody td {
 
 .col-icon { width: 32px; text-align: center; }
 .col-actions { width: 180px; text-align: right; white-space: nowrap; }
-.col-size { width: 90px; text-align: right; }
+.col-size { width: 110px; text-align: right; }
 .col-type { width: 100px; }
 .col-modified { width: 150px; }
 .col-name { min-width: 120px; }
@@ -312,16 +312,20 @@ tbody td {
 
 <header>
   <div class="header-left">
-    <button class="icon-btn" onclick="window.location.href='/'">&#127968;</button>
-    <button class="icon-btn" onclick="window.location.href='/?root'" title="Root">&#127758;</button>
+    <button class="icon-btn" onclick="window.location.href='{{ url_for('index') }}'" title="Home">&#127968;</button>
+    <button class="icon-btn" onclick="window.location.href='{{ url_for('index', root=1) }}'" title="This PC / Root">&#127758;</button>
     <div class="breadcrumb">
-      <a href="/" target="_self">Home</a>
+      {% if at_home %}
+      <span class="current">Home</span>
+      {% else %}
+      <a href="{{ url_for('index') }}">Home</a>
+      {% endif %}
       {% for crumb in breadcrumbs %}
       <span class="sep">&#8250;</span>
-      {% if loop.last %}
-      <span class="current">{{ crumb.name }}</span>
+      {% if crumb.url %}
+      <a href="{{ crumb.url }}">{{ crumb.name }}</a>
       {% else %}
-      <a href="/{{ crumb.path }}" target="_self">{{ crumb.name }}</a>
+      <span class="current">{{ crumb.name }}</span>
       {% endif %}
       {% endfor %}
     </div>
@@ -343,6 +347,7 @@ tbody td {
 </div>
 
 <div class="main">
+  {% if not drive_view %}
   <div class="toolbar">
     <div class="search-box">
       <span class="search-icon">&#128269;</span>
@@ -353,22 +358,23 @@ tbody td {
     <button class="btn" onclick="document.getElementById('folderInput').click()">&#128193; Upload Folder</button>
   </div>
 
-  <form id="uploadForm" action="/upload" method="post" enctype="multipart/form-data" class="hidden">
+  <form id="uploadForm" action="{{ url_for('upload') }}" method="post" enctype="multipart/form-data" class="hidden">
     <input type="file" id="fileInput" name="file" multiple onchange="document.getElementById('uploadForm').submit()">
-    <input type="hidden" name="target_path" value="{{ current_path }}">
+    <input type="hidden" name="target_path" value="{{ form_path }}">
   </form>
 
-  <form id="folderUploadForm" action="/upload_folder" method="post" enctype="multipart/form-data" class="hidden">
+  <form id="folderUploadForm" action="{{ url_for('upload_folder') }}" method="post" enctype="multipart/form-data" class="hidden">
     <input type="file" id="folderInput" name="folder" webkitdirectory multiple onchange="document.getElementById('folderUploadForm').submit()">
-    <input type="hidden" name="target_path" value="{{ current_path }}">
+    <input type="hidden" name="target_path" value="{{ form_path }}">
   </form>
 
-  <form id="newFolderForm" action="/new_folder" method="post" class="hidden">
+  <form id="newFolderForm" action="{{ url_for('new_folder') }}" method="post" class="hidden">
     <input type="hidden" name="folder_name" id="newFolderName">
-    <input type="hidden" name="target_path" value="{{ current_path }}">
+    <input type="hidden" name="target_path" value="{{ form_path }}">
   </form>
+  {% endif %}
 
-  {% if items or parent_path %}
+  {% if items or parent_url %}
   <table id="fileTable">
     <thead>
       <tr>
@@ -377,24 +383,30 @@ tbody td {
         <th class="col-size sortable" data-sort="size">Size</th>
         <th class="col-type sortable" data-sort="type">Type</th>
         <th class="col-modified sortable" data-sort="modified">Date Modified</th>
+        {% if not drive_view %}
         <th class="col-actions">Actions</th>
+        {% endif %}
       </tr>
     </thead>
     <tbody id="fileBody">
-      {% if parent_path is not none %}
+      {% if parent_url %}
       <tr data-name=".." data-size="0" data-type="Parent Directory" data-modified="0" data-is-dir="1">
         <td class="col-icon"><span class="file-icon folder">&#128193;</span></td>
-        <td class="col-name"><a class="item-name" href="{% if parent_path %}/{{ parent_path}}{% else %}/?root{% endif %}" target="_self">..</a></td>
+        <td class="col-name"><a class="item-name" href="{{ parent_url }}">..</a></td>
         <td class="col-size"><span class="item-size">--</span></td>
         <td class="col-type"><span class="item-type">Parent Directory</span></td>
         <td class="col-modified"><span class="item-modified">--</span></td>
+        {% if not drive_view %}
         <td class="col-actions"></td>
+        {% endif %}
       </tr>
       {% endif %}
       {% for item in items %}
       <tr data-name="{{ item.name.lower() }}" data-size="{{ item.size }}" data-type="{{ item.file_type }}" data-modified="{{ item.modified_sort }}" data-is-dir="{{ 1 if item.is_dir else 0 }}">
         <td class="col-icon">
-          {% if item.is_dir %}
+          {% if item.is_drive %}
+          <span class="file-icon folder">&#128190;</span>
+          {% elif item.is_dir %}
           <span class="file-icon folder">&#128193;</span>
           {% else %}
           {% set ext = item.name.split('.')[-1].lower() if '.' in item.name else '' %}
@@ -416,32 +428,40 @@ tbody td {
           {% endif %}
         </td>
         <td class="col-name">
-          {% if item.is_dir %}
-          <a class="item-name" href="/{{ item.path }}" target="_self">{{ item.name }}</a>
-          {% else %}
-          <a class="item-name" href="/download/{{ item.path }}" target="_self" download>{{ item.name }}</a>
-          {% endif %}
+          <a class="item-name" href="{{ item.url }}" title="{{ item.name }}" {% if not item.is_dir %}download{% endif %}>{{ item.name }}</a>
         </td>
         <td class="col-size"><span class="item-size">{{ item.size_display }}</span></td>
         <td class="col-type"><span class="item-type">{{ item.file_type }}</span></td>
         <td class="col-modified"><span class="item-modified">{{ item.modified }}</span></td>
+        {% if not drive_view %}
         <td class="col-actions">
-          {% if not item.is_dir and item.is_text %}
-          <a class="action-link" href="/edit/{{ item.path }}" title="Edit" target="_self">&#9998;</a>
+          {% if item.edit_url %}
+          <a class="action-link" href="{{ item.edit_url }}" title="Edit">&#9998;</a>
           {% endif %}
-          <a class="action-link" href="/download/{{ item.path }}" title="Download" target="_self" {% if not item.is_dir %}download{% endif %}>&#11015;</a>
-          <a class="action-link" href="/rename/{{ item.path }}" title="Rename" target="_self">&#9998;&#65039;</a>
-          <a class="action-link danger" href="#" onclick="event.preventDefault(); confirmDelete('/delete/{{ item.path }}', '{{ item.name }}')" title="Delete">&#128465;</a>
+          <a class="action-link" href="{{ item.download_url }}" title="Download" {% if not item.is_dir %}download{% endif %}>&#11015;</a>
+          {% if item.rename_url %}
+          <a class="action-link" href="{{ item.rename_url }}" title="Rename">&#9998;&#65039;</a>
+          {% endif %}
+          {% if item.delete_url %}
+          <a class="action-link danger" href="#" data-delete-url="{{ item.delete_url }}" data-name="{{ item.name }}" onclick="return confirmDelete(this)" title="Delete">&#128465;</a>
+          {% endif %}
         </td>
+        {% endif %}
       </tr>
       {% endfor %}
     </tbody>
   </table>
-  {% else %}
+  {% endif %}
+
+  {% if not items and not parent_url %}
   <div class="empty-state">
     <div class="empty-icon">&#128193;</div>
+    {% if drive_view %}
+    <p>No drives found</p>
+    {% else %}
     <p>This folder is empty</p>
     <p style="font-size:12px;margin-top:6px">Use the toolbar above to upload files or create a new folder</p>
+    {% endif %}
   </div>
   {% endif %}
 </div>
@@ -453,16 +473,22 @@ tbody td {
 (function() {
   const theme = localStorage.getItem('filemanager-theme') || 'light';
   document.documentElement.setAttribute('data-theme', theme);
-  document.getElementById('themeToggle').textContent = theme === 'dark' ? '\u2600' : '\u263E';
+  const toggle = document.getElementById('themeToggle');
+  if (toggle) {
+    toggle.textContent = theme === 'dark' ? '\u2600' : '\u263E';
+  }
 })();
 
-document.getElementById('themeToggle').addEventListener('click', function() {
-  const current = document.documentElement.getAttribute('data-theme');
-  const next = current === 'dark' ? 'light' : 'dark';
-  document.documentElement.setAttribute('data-theme', next);
-  localStorage.setItem('filemanager-theme', next);
-  this.textContent = next === 'dark' ? '\u2600' : '\u263E';
-});
+const themeToggle = document.getElementById('themeToggle');
+if (themeToggle) {
+  themeToggle.addEventListener('click', function() {
+    const current = document.documentElement.getAttribute('data-theme');
+    const next = current === 'dark' ? 'light' : 'dark';
+    document.documentElement.setAttribute('data-theme', next);
+    localStorage.setItem('filemanager-theme', next);
+    this.textContent = next === 'dark' ? '\u2600' : '\u263E';
+  });
+}
 
 // Auto-dismiss flash messages
 setTimeout(function() {
@@ -474,20 +500,17 @@ setTimeout(function() {
 }, 4000);
 
 // Search filter
-document.getElementById('searchInput').addEventListener('input', function() {
-  const q = this.value.trim().toLowerCase();
-  const rows = document.querySelectorAll('#fileBody tr');
-  let visible = 0;
-  rows.forEach(function(row) {
-    const name = row.getAttribute('data-name') || '';
-    if (name.includes(q)) {
-      row.style.display = '';
-      visible++;
-    } else {
-      row.style.display = 'none';
-    }
+const searchInput = document.getElementById('searchInput');
+if (searchInput) {
+  searchInput.addEventListener('input', function() {
+    const q = this.value.trim().toLowerCase();
+    const rows = document.querySelectorAll('#fileBody tr');
+    rows.forEach(function(row) {
+      const name = row.getAttribute('data-name') || '';
+      row.style.display = name.includes(q) ? '' : 'none';
+    });
   });
-});
+}
 
 // Sortable columns
 let sortDir = {};
@@ -495,23 +518,19 @@ document.querySelectorAll('th.sortable').forEach(function(th) {
   th.addEventListener('click', function() {
     const key = th.getAttribute('data-sort');
     const tbody = document.getElementById('fileBody');
-    const rows = Array.from(tbody.querySelectorAll('tr'));
+    if (!tbody) return;
 
+    const rows = Array.from(tbody.querySelectorAll('tr'));
     sortDir[key] = sortDir[key] === 'asc' ? 'desc' : 'asc';
     const dir = sortDir[key] === 'asc' ? 1 : -1;
 
     rows.sort(function(a, b) {
-      let va = a.getAttribute('data-' + key);
-      let vb = b.getAttribute('data-' + key);
-      if (key === 'name') {
+      let va = a.getAttribute('data-' + key) || '';
+      let vb = b.getAttribute('data-' + key) || '';
+      if (key === 'name' || key === 'type') {
         return dir * va.localeCompare(vb);
       }
-      if (key === 'type') {
-        return dir * va.localeCompare(vb);
-      }
-      va = parseFloat(va);
-      vb = parseFloat(vb);
-      return dir * (va - vb);
+      return dir * (parseFloat(va) - parseFloat(vb));
     });
 
     // Keep folders first when sorting by name
@@ -520,37 +539,37 @@ document.querySelectorAll('th.sortable').forEach(function(th) {
         const ad = parseInt(a.getAttribute('data-is-dir'));
         const bd = parseInt(b.getAttribute('data-is-dir'));
         if (ad !== bd) return bd - ad;
-        const va = a.getAttribute('data-name');
-        const vb = b.getAttribute('data-name');
-        return dir * va.localeCompare(vb);
+        return dir * (a.getAttribute('data-name') || '').localeCompare(b.getAttribute('data-name') || '');
       });
     }
 
     rows.forEach(function(row) { tbody.appendChild(row); });
 
-    // Update sort indicator
-    document.querySelectorAll('th.sortable').forEach(function(h) {
-      h.textContent = h.textContent.replace(/ [▲▼]$/, '');
+    document.querySelectorAll('th.sortable').forEach(function(header) {
+      header.textContent = header.textContent.replace(/ [\u25B2\u25BC]$/, '');
     });
     th.textContent = th.textContent.trim() + ' ' + (dir === 1 ? '\u25B2' : '\u25BC');
   });
 });
 
 // Confirm delete
-function confirmDelete(url, name) {
+function confirmDelete(element) {
+  const name = element.getAttribute('data-name') || 'this item';
   if (confirm('Delete "' + name + '"? This cannot be undone.')) {
     const form = document.getElementById('deleteForm');
-    form.action = url;
+    form.action = element.getAttribute('data-delete-url');
     form.submit();
   }
+  return false;
 }
 
 // New folder prompt
 function promptNewFolder() {
   const name = prompt('Enter new folder name:');
-  if (name && name.trim()) {
+  const form = document.getElementById('newFolderForm');
+  if (name && name.trim() && form) {
     document.getElementById('newFolderName').value = name.trim();
-    document.getElementById('newFolderForm').submit();
+    form.submit();
   }
 }
 </script>
