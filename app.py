@@ -8,6 +8,7 @@ import shutil
 import socket
 import stat
 import string
+import sys
 import tempfile
 import time
 import zipfile
@@ -33,8 +34,77 @@ IS_WINDOWS = os.name == 'nt'
 # explicit and testable.
 pathmod = ntpath if IS_WINDOWS else posixpath
 
-HOME_DIR = pathmod.normpath(pathmod.abspath(os.path.expanduser('~')))
+# The real OS home. On Termux this is the private app home
+# (/data/data/com.termux/files/home), which is not where the user's files live.
+SYSTEM_HOME_DIR = pathmod.normpath(pathmod.abspath(os.path.expanduser('~')))
+TERMUX_HOME_DIR = SYSTEM_HOME_DIR
 APP_DIR = pathmod.normpath(pathmod.abspath(os.path.dirname(__file__)))
+
+
+def detect_android():
+    """True when running under Termux or another Android Python environment."""
+    if sys.platform.startswith('android'):
+        return True
+    if not sys.platform.startswith('linux'):
+        return False
+    if os.environ.get('TERMUX_VERSION') or 'com.termux' in os.environ.get('PREFIX', ''):
+        return True
+    if os.path.isdir('/data/data/com.termux/files'):
+        return True
+    if os.environ.get('ANDROID_ROOT') and os.path.isdir('/storage/emulated/0'):
+        return True
+    return False
+
+
+IS_ANDROID = detect_android()
+ANDROID_INTERNAL_CANDIDATES = ('/storage/emulated/0', '/sdcard')
+
+
+def is_readable_dir(path):
+    """True if a directory can actually be opened, not just stat()'d."""
+    try:
+        with os.scandir(path) as entries:
+            next(entries, None)
+        return True
+    except OSError:
+        return False
+
+
+def android_internal_storage():
+    """Return the Android shared-storage root (normally /storage/emulated/0)."""
+    if not IS_ANDROID:
+        return None
+
+    candidates = list(ANDROID_INTERNAL_CANDIDATES)
+    candidates.append(os.path.join(TERMUX_HOME_DIR, 'storage', 'shared'))
+
+    fallback = None
+    for candidate in candidates:
+        try:
+            if not os.path.isdir(candidate):
+                continue
+            real = os.path.realpath(candidate)
+            if is_readable_dir(candidate):
+                return real
+            if fallback is None:
+                fallback = real
+        except OSError:
+            pass
+    return fallback
+
+
+# On Android, "Home" should be shared storage (where photos, Downloads, DCIM
+# live), not Termux's private home. Every other OS keeps its normal home.
+def default_home_dir():
+    if IS_ANDROID:
+        internal = android_internal_storage()
+        if internal and is_readable_dir(internal):
+            return internal
+        return TERMUX_HOME_DIR
+    return SYSTEM_HOME_DIR
+
+
+HOME_DIR = default_home_dir()
 
 DRIVE_PATH_RE = re.compile(r'^[A-Za-z]:')
 DRIVE_ONLY_RE = re.compile(r'^[A-Za-z]:$')
@@ -174,6 +244,8 @@ def url_for_dir(abs_path):
         return url_for('index', subpath=virtual)
 
     # POSIX filesystem root. '' means "home", so use ?root instead.
+    if IS_ANDROID:
+        return url_for('index', root=1, device_root=1)
     return url_for('index', root=1)
 
 
@@ -219,9 +291,14 @@ def build_breadcrumbs(current_abs, current_virtual):
         else:
             start = 0
     else:
+        root_url = (
+            url_for('index', root=1, device_root=1)
+            if IS_ANDROID
+            else url_for('index', root=1)
+        )
         crumbs.append({
             'name': 'Root',
-            'url': None if not parts else url_for('index', root=1),
+            'url': None if not parts else root_url,
         })
         start = 0
 
@@ -238,7 +315,7 @@ def build_breadcrumbs(current_abs, current_virtual):
 
 def is_protected_path(abs_path):
     """Never let the UI delete or rename the home folder or a filesystem root."""
-    protected = [HOME_DIR, APP_DIR]
+    protected = [HOME_DIR, TERMUX_HOME_DIR, APP_DIR]
 
     if IS_WINDOWS:
         protected.extend(drive + '\\' for drive in windows_drives())
@@ -267,6 +344,41 @@ def windows_drives():
                 drives.append(letter + ':')
 
     return drives
+
+
+def android_storage_roots():
+    """Return internal storage plus any SD card / USB storage on Android."""
+    if not IS_ANDROID:
+        return []
+
+    roots = []
+
+    def add(path):
+        try:
+            real = os.path.realpath(path)
+        except OSError:
+            return
+        if not os.path.isdir(real):
+            return
+        if any(same_path(real, existing) for existing in roots):
+            return
+        roots.append(real)
+
+    for candidate in ANDROID_INTERNAL_CANDIDATES:
+        add(candidate)
+
+    # termux-setup-storage creates ~/storage/shared as a link to shared storage.
+    add(os.path.join(TERMUX_HOME_DIR, 'storage', 'shared'))
+
+    try:
+        for name in sorted(os.listdir('/storage')):
+            if name in ('emulated', 'self'):
+                continue
+            add(os.path.join('/storage', name))
+    except OSError:
+        pass
+
+    return roots
 
 
 # ---------------------------------------------------------------------------
@@ -479,8 +591,95 @@ def make_item(name, item_path, is_dir, deadline, is_drive=False):
     return item
 
 
+def make_shortcut_item(name, abs_path, url, file_type='Folder'):
+    """Build a row for a navigation shortcut (storage roots, home, etc.)."""
+    size_value = 0
+    size_text = '\u2014'
+    try:
+        usage = shutil.disk_usage(abs_path)
+        size_value = usage.total
+        size_text = f'{format_size(usage.free)} free'
+    except OSError:
+        pass
+
+    return {
+        'name': name,
+        'path': virtual_path_from_abs(abs_path),
+        'is_dir': True,
+        'is_drive': False,
+        'size': size_value,
+        'size_display': size_text,
+        'modified': '\u2014',
+        'modified_sort': 0,
+        'file_type': file_type,
+        'is_text': False,
+        'url': url,
+        'download_url': None,
+        'edit_url': None,
+        'rename_url': None,
+        'delete_url': None,
+    }
+
+
 def redirect_to_dir(abs_path):
     return redirect(url_for_dir(abs_path))
+
+
+def render_android_storage():
+    """Android-only storage overview shown by the globe/root button."""
+    internal = android_internal_storage()
+    items = []
+
+    for path in android_storage_roots():
+        if internal and same_path(path, internal):
+            name = 'Internal storage (0)'
+            file_type = 'Internal storage'
+        else:
+            name = f'SD card / USB ({os.path.basename(path)})'
+            file_type = 'Removable storage'
+        items.append(make_shortcut_item(
+            name,
+            path,
+            url_for('index', subpath=virtual_path_from_abs(path)),
+            file_type,
+        ))
+
+    items.append(make_shortcut_item(
+        'Termux home',
+        TERMUX_HOME_DIR,
+        url_for('index', subpath=virtual_path_from_abs(TERMUX_HOME_DIR)),
+        'Folder',
+    ))
+    items.append(make_shortcut_item(
+        'Device root (/)',
+        pathmod.abspath(os.sep),
+        url_for('index', root=1, device_root=1),
+        'System',
+    ))
+
+    return render_template(
+        'index.html',
+        items=items,
+        current_path='',
+        form_path='',
+        current_abs_path='Storage',
+        parent_url=None,
+        breadcrumbs=[{'name': 'Storage', 'url': None}],
+        at_home=False,
+        drive_view=True,
+    )
+
+
+@app.context_processor
+def inject_android_helpers():
+    internal = android_internal_storage()
+    return {
+        'is_android': IS_ANDROID,
+        'android_internal_url': (
+            url_for('index', subpath=virtual_path_from_abs(internal))
+            if internal else None
+        ),
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -495,7 +694,14 @@ def favicon():
 @app.route('/')
 @app.route('/<path:subpath>')
 def index(subpath=''):
-    show_root = 'root' in request.args
+    show_device_root = 'device_root' in request.args
+    show_root = 'root' in request.args or show_device_root
+
+    # On Android, the globe button opens a storage overview instead of the
+    # Linux / directory (which mostly contains Termux internals).
+    if show_root and IS_ANDROID and not show_device_root:
+        return render_android_storage()
+
     drive_view = False
 
     if show_root:
@@ -549,7 +755,10 @@ def index(subpath=''):
         names = sorted(os.listdir(target_abs), key=lambda name: name.lower())
     except OSError as exc:
         names = []
-        flash(f'Cannot open this folder: {exc.strerror or exc}', 'error')
+        if IS_ANDROID:
+            flash('Cannot open this folder. Run "termux-setup-storage" in Termux, allow storage access, then try again.', 'error')
+        else:
+            flash(f'Cannot open this folder: {exc.strerror or exc}', 'error')
 
     for name in names:
         item_path = pathmod.join(target_abs, name)
@@ -922,6 +1131,8 @@ if __name__ == '__main__':
     print(f'  Local:   http://127.0.0.1:{port}')
     print(f'  Network: http://{lan_ip}:{port}')
     print(f'  Home:    {HOME_DIR}')
+    if IS_ANDROID and not same_path(HOME_DIR, TERMUX_HOME_DIR):
+        print(f'  Termux:  {TERMUX_HOME_DIR}  (globe button -> Termux home)')
     print(f'  Root:    {"This PC (all drives)" if IS_WINDOWS else "/"}')
     if IS_WINDOWS:
         print('  Tip:     If other devices cannot connect, allow Python through')

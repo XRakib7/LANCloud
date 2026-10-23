@@ -313,7 +313,10 @@ tbody td {
 <header>
   <div class="header-left">
     <button class="icon-btn" onclick="window.location.href='{{ url_for('index') }}'" title="Home">&#127968;</button>
-    <button class="icon-btn" onclick="window.location.href='{{ url_for('index', root=1) }}'" title="This PC / Root">&#127758;</button>
+    <button class="icon-btn" onclick="window.location.href='{{ url_for('index', root=1) }}'" title="{% if is_android %}Storage and device root{% else %}This PC / Root{% endif %}">&#127758;</button>
+    {% if is_android and android_internal_url %}
+    <button class="icon-btn" onclick="window.location.href='{{ android_internal_url }}'" title="Internal storage">&#128241;</button>
+    {% endif %}
     <div class="breadcrumb">
       {% if at_home %}
       <span class="current">Home</span>

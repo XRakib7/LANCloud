@@ -192,12 +192,37 @@ Click the 🌐 button (next to the home button) to see **This PC** and every ava
 
 ---
 
+## 🤖 Running on Android (Termux)
+
+Android can host LANCloud through **Termux**:
+
+```bash
+pkg update && pkg install python
+termux-setup-storage
+cd ~/LANCloud
+python -m pip install -r requirements.txt
+python app.py
+```
+
+`termux-setup-storage` is the important step — it gives Termux access to your phone's shared storage.
+
+- On Android, the 🏠 **Home** button opens **Internal storage (`/storage/emulated/0`)** by default.
+- Tap the **📱 phone button** in the header to jump straight to **Internal storage** from anywhere.
+- Tap the **🌐 globe button** to see **Internal storage (0)**, any SD card/USB storage, your **Termux home**, and the **device root**.
+- If Android stops the server when the screen locks, run `termux-wake-lock` before starting it.
+- Android browsers can also use LANCloud as a client by opening the server's Network URL.
+
+> Folder upload support depends on the Android browser. Browsing, downloading, uploading files, editing, renaming, and deleting all work normally.
+
+---
+
 ## 📖 How To Use
 
 | Action | How |
 |---|---|
 | **Browse** | Click a folder to open it, click `..` to go up, or use the breadcrumb trail at the top |
 | **Switch drives (Windows)** | Click the 🌐 button to open **This PC** |
+| **Open phone storage (Android)** | 🏠 Home opens **Internal storage**; tap 📱 for a direct shortcut, or 🌐 for internal storage, SD cards, Termux home, and device root |
 | **Upload a file** | Click **Upload File** — pick one or many — they land in the current folder |
 | **Upload a folder** | Click **Upload Folder** — the whole folder structure uploads intact |
 | **Download a file** | Tap the ↓ icon next to it |
