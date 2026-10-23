@@ -1,4 +1,4 @@
-# 📂 Online File Manager
+# 📂 LANCloud — Online File Manager
 
 > **Turn any computer into your personal cloud — in 30 seconds.** Share, access, and manage your files from your phone, tablet, laptop, or any other device on the same WiFi. No accounts, no sign-ups, no cables, no cloud storage limits, no monthly fees. Your files never leave your home network.
 
@@ -10,7 +10,7 @@
 
 ## 🌟 What Is This?
 
-**Online File Manager** gives your computer a clean, beautiful web interface for your files — and then shares it with every device on your WiFi network.
+**LANCloud** gives your computer a clean, beautiful web interface for your files — and then shares it with every device on your WiFi network.
 
 Run it on your PC (or a VM, or a spare laptop, or a Raspberry Pi), and instantly open your files from:
 
@@ -87,8 +87,8 @@ That's it. No database, no Node.js, no Docker, no config files.
 
 ```bash
 # 1. Clone the repository
-git clone https://github.com/rakibhossain/online-file-manager.git
-cd online-file-manager
+git clone https://github.com/XRakib7/LANCloud.git
+cd LANCloud
 
 # 2. Install the single dependency
 pip install -r requirements.txt
@@ -231,8 +231,8 @@ MIT License — free to use, modify, and share. See the [LICENSE](LICENSE) file.
 
 ## 👤 Author
 
-**Rakib** — Personal project
-🔗 GitHub: https://github.com/rakibhossain
+**XRakib7** — Personal project
+🔗 GitHub: https://github.com/XRakib7
 
 ---
 
