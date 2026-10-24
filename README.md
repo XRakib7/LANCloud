@@ -1,129 +1,54 @@
-# 📂 LANCloud — Online File Manager
+# LANCloud
 
-> **Turn any computer into your personal cloud — in 30 seconds.** Share, access, and manage your files from your phone, tablet, laptop, or any other device on the same WiFi. No accounts, no sign-ups, no cables, no cloud storage limits, no monthly fees. Your files never leave your home network.
+A small Flask app that serves your filesystem as a web file manager over your local network. Run it on a PC, laptop, VM or phone, then open it from any other device on the same WiFi to browse, upload, download and edit files without cables or cloud storage.
 
-[![Python](https://img.shields.io/badge/Python-3.8%2B-blue?logo=python)](https://www.python.org/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](#contributing)
+It's a single Python file plus a few templates. No database, no accounts, nothing leaves your network.
 
----
+![Python](https://img.shields.io/badge/python-3.8%2B-blue)
+![License](https://img.shields.io/badge/license-MIT-green)
 
-## 🌟 What Is This?
+## Features
 
-**LANCloud** gives your computer a clean, beautiful web interface for your files — and then shares it with every device on your WiFi network.
+- Browse the whole filesystem with breadcrumb navigation. On Windows you can switch between drives.
+- Upload single files or an entire folder with its subdirectories.
+- Download a file, or download a folder as a ZIP.
+- Edit text files directly in the browser.
+- Create folders, rename, and delete (with confirmation).
+- Live search as you type, and sortable columns.
+- Dark mode that is remembered between visits.
+- Responsive layout, usable from a phone.
 
-Run it on your PC (or a VM, or a spare laptop, or a Raspberry Pi), and instantly open your files from:
+## Requirements
 
-- 📱 **Your phone** — grab photos, documents, or music from your PC while on the couch
-- 💻 **Another laptop** — pull that report off your desktop without emailing yourself
-- 📟 **A tablet** — read PDFs straight off your computer's drive
-- 🖥️ **A virtual machine** — finally an easy way to move files in and out of VirtualBox VMs
+- Python 3.8 or newer
+- A web browser on the device you're browsing from
 
-All you need is a web browser. That's it. **Nothing else needed.**
+Nothing else. No Node.js, no Docker, no config file.
 
-Works the same on **Windows, Linux, macOS**, and virtual machines.
-
----
-
-## 💡 Why You Need This
-
-Ever run into these situations?
-
-| 😩 The Problem | ✅ With Online File Manager |
-|---|---|
-| "How do I get this file from my PC to my phone?" | Open the network URL on your phone, tap download. Done. |
-| Emailing files to yourself like a caveman | Your files are one browser tab away, always |
-| USB cables, pendrives, Bluetooth pairing rituals | Zero hardware, zero pairing — just WiFi and a browser |
-| Cloud uploads of large files taking forever | Transfers happen directly over your local network — gigabit speed |
-| Privacy worries about files on Google Drive / Dropbox | Your files **never leave your machine**. Nothing is uploaded anywhere |
-| Free cloud storage is full, paywall asking for a subscription | Unlimited storage — your disk is the limit |
-| Setting up Samba, NFS, or SSH feels like rocket science | One command: `python app.py`. You're done |
-
-**In short:** it's your own private cloud, without the cloud.
-
----
-
-## 🚀 What It Can Do
-
-Everything you'd expect from a full file manager — right in your browser:
-
-| | Feature | What You Get |
-|---|---|---|
-| 📂 | **Browse everything** | Navigate your entire filesystem with breadcrumbs. On Windows, use the 🌐 button to switch between drives (`C:`, `D:`, USB drives, …) |
-| ⬆️ | **Upload files** | Send files *to* your computer from any device — multiple files at once |
-| 📁 | **Upload whole folders** | Drop an entire folder (with subfolders) from your phone straight onto your PC |
-| ⬇️ | **Download files** | Grab any single file to any device instantly |
-| 📦 | **Download folders as ZIP** | One click, the whole folder gets zipped and sent to you |
-| ✏️ | **Edit text files in-browser** | Fix a config, tweak a script, update notes — edit and save without downloading anything |
-| 🆕 | **Create folders** | New folders created right from the toolbar |
-| 🔀 | **Rename** | Rename any file or folder from the browser |
-| 🗑️ | **Delete** | Remove files and folders (with confirmation — no accidental wipes) |
-| 🔍 | **Instant search** | Live filtering as you type — find that one file in a folder of hundreds |
-| ↕️ | **Sortable columns** | Sort by Name, Size, Type, or Date Modified with a click |
-| 🌓 | **Dark mode** | Easy on the eyes at night — your preference is remembered |
-| 📱 | **Fully responsive** | Looks and works great on phones, tablets, and desktops |
-| 🧠 | **Smart file icons** | Instantly recognizes code, text, images, video, audio, archives, and PDFs |
-
-### 💪 How Powerful Is It?
-
-- **Full filesystem access** — not a sandboxed "storage folder" like cloud apps. Browse your *entire* disk, including every drive on Windows.
-- **Gigabit transfers** — everything moves over your local WiFi/LAN, not through some server across the world. A 2 GB file takes seconds, not an hour.
-- **Unlimited space** — the only limit is your hard drive.
-- **Unlimited devices** — phone, laptop, tablet, smart TV browser, anything with a browser on the network.
-- **True two-way street** — unlike most "sharing" tools that only send, this one uploads *and* downloads *and* edits *and* organizes. It's a complete file manager, not just a file dropper.
-- **Runs anywhere Python runs** — Windows, macOS, Linux, a VM, a Raspberry Pi, an old laptop gathering dust in a drawer. Turn that old machine into a home file server in one command.
-
----
-
-## 🏁 Getting Started
-
-### Prerequisites
-
-Only one thing:
-
-- **Python 3.8 or newer** installed ([python.org](https://www.python.org/downloads/))
-
-That's it. No database, no Node.js, no Docker, no config files.
-
-> On Windows, tick **"Add Python to PATH"** in the installer. The `py` launcher is recommended.
-
-### Installation
+## Setup
 
 ```bash
-# 1. Clone the repository
 git clone https://github.com/XRakib7/LANCloud.git
 cd LANCloud
-
-# 2. Install the dependency
 python -m pip install -r requirements.txt
-```
-
-On Windows, use the Python launcher:
-
-```bat
-py -m pip install -r requirements.txt
-```
-
-`requirements.txt` uses a flexible version range (`Flask>=2.3,<4`), so pip picks a Flask version compatible with your Python. You no longer need to edit it manually.
-
-### Run It
-
-```bash
 python app.py
 ```
 
-or on Windows:
+On Windows use the launcher instead of `python`:
 
 ```bat
+py -m pip install -r requirements.txt
 py app.py
 ```
 
-You can also use the included launcher scripts:
+`requirements.txt` asks for `Flask>=2.3,<4`, so pip will pick a version that matches your Python.
 
-- **Windows:** double-click `run_windows.bat` (installs Flask automatically if missing)
-- **Linux/macOS:** `./run_linux.sh`
+There are also two launcher scripts that install Flask if it's missing:
 
-You'll see something like:
+- Windows: `run_windows.bat`
+- Linux/macOS: `./run_linux.sh`
+
+On startup the app prints something like this:
 
 ```
 LANCloud is running:
@@ -133,68 +58,47 @@ LANCloud is running:
   Root:    /
 ```
 
-- **On the same computer:** open `http://127.0.0.1:5000`
-- **On your phone / any other device on the WiFi:** open the **Network** address, e.g. `http://192.168.1.10:5000`
+Open the Local address on the same machine, or the Network address from your phone or another computer.
 
-🎉 **That's the whole setup.** Your computer is now a personal cloud.
+## Windows
 
-> 💡 **Tip:** Bookmark the network address on your phone. As long as this app is running on your PC, your files are one tap away.
+Windows blocks incoming connections by default, which is the usual reason the app opens on the PC but not on your phone. You need to allow the port through the firewall.
 
----
+The quickest way is to right-click `allow_firewall_windows.bat` and choose **Run as administrator**. Then check that your WiFi network is set to **Private** (Settings → Network & Internet → WiFi → your network → Network profile type).
 
-## 🪟 Running on Windows
-
-Windows needs one extra step: **allow the port through Windows Firewall**. Windows blocks incoming connections by default, which is the most common reason the app loads on the PC but not on your phone.
-
-### Option A — the easy way
-
-1. Right-click **`allow_firewall_windows.bat`** → **Run as administrator**.
-2. Make sure your WiFi network is set to **Private** (Settings → Network & Internet → WiFi → your network → Network profile type).
-3. Open the **Network** URL printed by `app.py` on your phone.
-
-### Option B — manual command
-
-Open **Command Prompt as Administrator** and run:
+To add the rule manually, open Command Prompt as Administrator:
 
 ```bat
 netsh advfirewall firewall add rule name="LANCloud" dir=in action=allow protocol=TCP localport=5000 profile=private,domain
 ```
 
-To remove the rule later:
+To remove it later:
 
 ```bat
 netsh advfirewall firewall delete rule name="LANCloud"
 ```
 
-### Finding your Windows IP address
+To find your IP address:
 
 ```bat
 ipconfig
 ```
 
-Look for **IPv4 Address** under your active WiFi/Ethernet adapter (for example `192.168.1.107`). Then open:
+Look for the IPv4 address under your active WiFi or Ethernet adapter, then open `http://192.168.1.107:5000` (with your own address).
 
-```
-http://192.168.1.107:5000
-```
+The globe button next to the home button opens **This PC** with all available drives, so you can browse `C:`, `D:`, USB drives and so on even if the project lives on a different drive than your home folder.
 
-### Browsing other drives
+If another device still can't connect:
 
-Click the 🌐 button (next to the home button) to see **This PC** and every available drive. Click a drive to browse it. This works even when the project is on `D:` and your home folder is on `C:` — the app keeps Windows drive letters intact.
+- Both devices must be on the same WiFi network, not mobile data or a guest network.
+- Turn off any VPN on either device while testing.
+- Some routers isolate clients from each other. Turn that off for your home network.
+- Check that the Flask window is still running and shows `Running on http://0.0.0.0:5000`.
+- Test the `127.0.0.1` URL on the PC first. If that works but the LAN address doesn't, it's the firewall or the network profile.
 
-### Still can't connect from another device?
+## Android (Termux)
 
-- Phone and PC must be on the **same WiFi network** (not mobile data, not a guest network).
-- Turn off **VPN** on either device while testing.
-- Some routers have **AP isolation / client isolation** enabled — turn it off for your home network.
-- Make sure the Flask window is still running and shows `Running on http://0.0.0.0:5000`.
-- Try the `127.0.0.1` URL on the PC first. If that works but the LAN URL does not, it is almost always the firewall or network profile.
-
----
-
-## 🤖 Running on Android (Termux)
-
-Android can host LANCloud through **Termux**:
+Android can host LANCloud through Termux:
 
 ```bash
 pkg update && pkg install python
@@ -204,91 +108,76 @@ python -m pip install -r requirements.txt
 python app.py
 ```
 
-`termux-setup-storage` is the important step — it gives Termux access to your phone's shared storage.
+`termux-setup-storage` is the important step, since it gives Termux access to shared storage.
 
-- On Android, the 🏠 **Home** button opens **Internal storage (`/storage/emulated/0`)** by default.
-- Tap the **📱 phone button** in the header to jump straight to **Internal storage** from anywhere.
-- Tap the **🌐 globe button** to see **Internal storage (0)**, any SD card/USB storage, your **Termux home**, and the **device root**.
-- If Android stops the server when the screen locks, run `termux-wake-lock` before starting it.
-- Android browsers can also use LANCloud as a client by opening the server's Network URL.
+On Android, the Home button opens `/storage/emulated/0` by default. The phone button in the header jumps straight there from anywhere, and the globe button lists internal storage, any SD card or USB storage, the Termux home directory, and the device root.
 
-> Folder upload support depends on the Android browser. Browsing, downloading, uploading files, editing, renaming, and deleting all work normally.
+If Android stops the server when the screen locks, run `termux-wake-lock` before starting it.
 
----
+Folder upload depends on the browser. Browsing, downloading, uploading files, editing, renaming and deleting all work normally.
 
-## 📖 How To Use
+## Usage
 
 | Action | How |
 |---|---|
-| **Browse** | Click a folder to open it, click `..` to go up, or use the breadcrumb trail at the top |
-| **Switch drives (Windows)** | Click the 🌐 button to open **This PC** |
-| **Open phone storage (Android)** | 🏠 Home opens **Internal storage**; tap 📱 for a direct shortcut, or 🌐 for internal storage, SD cards, Termux home, and device root |
-| **Upload a file** | Click **Upload File** — pick one or many — they land in the current folder |
-| **Upload a folder** | Click **Upload Folder** — the whole folder structure uploads intact |
-| **Download a file** | Tap the ↓ icon next to it |
-| **Download a folder** | Click the ↓ icon next to a folder — you get a ZIP |
-| **Edit a text file** | Tap the ✏️ icon, make your change, hit **Save Changes** |
-| **Rename** | Tap the rename icon and type a new name |
-| **Delete** | Tap 🗑️ and confirm (permanent — be careful!) |
-| **Create a folder** | Click **New Folder** and name it |
-| **Search** | Just start typing in the search box — the list filters live |
-| **Sort** | Click any column header (Name / Size / Type / Modified) |
-| **Dark mode** | Toggle the theme switch — it's remembered across visits |
+| Browse | Click a folder to open it, `..` to go up, or use the breadcrumb trail |
+| Switch drives (Windows) | Globe button → **This PC** |
+| Open phone storage (Android) | Home opens internal storage, the phone button is a shortcut, the globe button lists all storage |
+| Upload a file | **Upload File**, one or many |
+| Upload a folder | **Upload Folder**, structure is preserved |
+| Download a file | Download icon next to the file |
+| Download a folder | Download icon next to the folder, delivered as a ZIP |
+| Edit a text file | Pencil icon, then **Save Changes** |
+| Rename | Rename icon, enter a new name |
+| Delete | Trash icon, then confirm. This is permanent. |
+| Create a folder | **New Folder** |
+| Search | Type in the search box, the list filters live |
+| Sort | Click a column header |
+| Dark mode | Toggle the theme switch |
 
-### Root access
+The app starts in your home directory, but the globe/root button lets you reach the rest of the filesystem, which is handy for editing system configs on a VM or opening another Windows drive.
 
-Start from your home directory, but the **🌐 / Root** button lets you browse the entire filesystem — perfect for editing system configs on a VM or reaching another Windows drive.
+Folder sizes are calculated with a time budget so that opening something like `C:\Windows` doesn't hang the page. Folders that take too long to scan show `—` instead of a size.
 
-> Folder sizes are calculated with a small time budget so opening a huge folder like `C:\Windows` does not freeze the page. A folder that is too large to scan quickly shows `—` instead of a size.
+## VirtualBox
 
----
+Getting files into and out of a VM without configuring Samba or shared folders is one of the more useful ways to run this.
 
-## 🖥️ Running on a Virtual Machine (VirtualBox)
+Bridged adapter, recommended:
 
-This is a killer use case: getting files in and out of a VM without Samba, SSH, or shared-folder headaches.
+1. VM Settings → Network → Attach to **Bridged Adapter**
+2. Start the VM; it gets its own IP on your network
+3. Open `http://<VM-IP>:5000` from the host or your phone
 
-### Option A — Bridged Adapter (recommended)
+NAT with port forwarding:
 
-1. VM Settings → Network → Attach to: **Bridged Adapter**
-2. Start the VM — it gets its own IP on your WiFi
-3. From your host or phone, open `http://<VM-IP>:5000`
-
-### Option B — NAT with Port Forwarding
-
-1. VM Settings → Network → Attach to: **NAT Network** → Port Forwarding:
+1. VM Settings → Network → Attach to **NAT Network** → Port Forwarding, then add:
 
    | Protocol | Host IP | Host Port | Guest Port |
-   |----------|---------|-----------|------------|
+   |---|---|---|---|
    | TCP | 127.0.0.1 | 5000 | 5000 |
 
-2. Allow the port in the VM's firewall:
+2. Allow the port inside the VM:
 
    ```bash
    sudo ufw allow 5000/tcp
    ```
 
-3. Open `http://127.0.0.1:5000` from your host machine.
+3. Open `http://127.0.0.1:5000` on the host.
 
----
+## Troubleshooting
 
-## 🧰 Troubleshooting
+**`pip install -r requirements.txt` can't find Flask**
 
-### `pip install -r requirements.txt` cannot find Flask
+Use the pip that belongs to your Python (`py -m pip` on Windows, `python3 -m pip` on Linux/macOS). Upgrading pip with `python -m pip install --upgrade pip` usually helps. Check `python --version` is 3.8 or newer.
 
-- Use the command that matches your Python:
-  - Windows: `py -m pip install -r requirements.txt`
-  - Linux/macOS: `python3 -m pip install -r requirements.txt`
-- Upgrade pip first: `python -m pip install --upgrade pip`
-- Check your Python version: `python --version` (3.8+ required).
-- The requirements file is now `Flask>=2.3,<4`, so it no longer demands one exact version.
+**The page loads on the PC but not on my phone**
 
-### The page loads on the PC but not on my phone
+See the Windows section above. On Linux, run `sudo ufw allow 5000/tcp`.
 
-See **[Running on Windows](#-running-on-windows)** above. On Linux, allow the port with `sudo ufw allow 5000/tcp`.
+**`Address already in use`**
 
-### `Address already in use` / port 5000 is busy
-
-Run on another port:
+Something else is using port 5000, or a previous instance is still running. Use a different port:
 
 ```bash
 # Linux/macOS
@@ -307,89 +196,64 @@ $env:PORT="8080"
 py app.py
 ```
 
-Then open `http://<your-ip>:8080`. If you use the firewall script, run it with the same port: `allow_firewall_windows.bat 8080`.
+Then open `http://<your-ip>:8080`. If you use the firewall script, pass the same port to it.
 
-### A page shows "Internal Server Error"
+**A page shows "Internal Server Error"**
 
-Run the app from a terminal and look at the traceback printed there. Common causes are permission-protected folders and files locked by another program. The app catches most of these and shows a flash message instead of crashing.
+Run the app from a terminal and read the traceback. The usual causes are permission-protected folders and files locked by another program. Most of these are caught and shown as a flash message rather than crashing the app.
 
-### The app feels slow in `C:\Windows` or a huge folder
+**`C:\Windows` or a large folder feels slow**
 
-Folder sizes are sampled with a time limit on purpose. The listing itself is fast; only the size column is approximate (`—` means "too large to scan quickly"). You can still open, download, rename, and delete everything.
+Only the size column is slow, and it's intentionally capped. The listing itself is quick, and opening, downloading, renaming and deleting still work.
 
----
+## Security
 
-## 🔒 A Word On Security
+There is no login. Anyone on your network who knows the address can read and write files, which is the intended behaviour for a home network tool but worth being explicit about.
 
-This is designed as a **personal, home-network tool** — it has **no login** by design, so anyone on your WiFi could access the files.
+Reasonable for a home WiFi network, a trusted VM, or quick transfers between your own devices. Don't run it on public WiFi, on a network with people you don't trust, or port-forwarded to the internet.
 
-That's perfectly fine for:
+If you need to lock it down:
 
-- ✅ Your home WiFi (family network)
-- ✅ A trusted VM setup
-- ✅ Quick personal file transfers
+- Set a fixed secret key so sessions survive a restart: `SECRET_KEY=your-long-random-value` (or `set SECRET_KEY=...` on Windows).
+- Bind to localhost only: `HOST=127.0.0.1 python app.py`.
+- Put it behind an authenticating reverse proxy such as Nginx if it has to be reachable from outside.
+- Debug mode is off by default. Enable it only locally with `FLASK_DEBUG=1 python app.py`.
 
-Do **not** run it on:
+## Configuration
 
-- ❌ Public WiFi (cafés, airports)
-- ❌ Networks with strangers on them
-- ❌ Port-forwarded to the internet
+| Variable | Default | Notes |
+|---|---|---|
+| `PORT` | `5000` | Port to listen on |
+| `HOST` | `0.0.0.0` | Use `127.0.0.1` for local-only access |
+| `SECRET_KEY` | random per start | Set it to keep sessions between restarts |
+| `FLASK_DEBUG` | off | Development only |
 
-**Hardening tips if you need them:**
+Theme colours and file-type icons live in the templates.
 
-- Set a fixed secret key so sessions survive restarts: `SECRET_KEY=your-long-random-value` (or `set SECRET_KEY=...` on Windows).
-- Bind to `127.0.0.1` for local-only access: `HOST=127.0.0.1 python app.py`.
-- Put it behind an authenticating reverse proxy (e.g., Nginx) if you ever expose it beyond your network.
-- Debug mode is **off by default**. Only enable it on your own machine for development: `FLASK_DEBUG=1 python app.py`. Never expose debug mode to a LAN.
-
----
-
-## 🛠️ Customization
-
-- **Port:** set the `PORT` environment variable (default `5000`)
-- **Bind address:** set `HOST` (default `0.0.0.0`; use `127.0.0.1` for local-only)
-- **Secret key:** set `SECRET_KEY`
-- **Theme & styling:** edit the CSS variables in the templates
-- **File-type icons:** extend the extension maps in the templates
-
----
-
-## 🗺️ Roadmap
+## Roadmap
 
 - [ ] Login/password protection
-- [ ] Image, video, and PDF preview in the browser
-- [ ] Copy / move files between directories
+- [ ] Image, video and PDF previews
+- [ ] Copy and move files between directories
 - [ ] Multi-select and bulk actions
 - [ ] Drag-and-drop uploads
-- [ ] Dockerfile for one-command deployment
+- [ ] Dockerfile
 
----
+## Contributing
 
-## 🤝 Contributing
-
-Suggestions and pull requests are welcome!
+Pull requests and suggestions are welcome.
 
 1. Fork the repository
-2. Create a feature branch: `git checkout -b feature/your-feature`
-3. Commit: `git commit -m "Add your feature"`
-4. Push: `git push origin feature/your-feature`
-5. Open a Pull Request
+2. Create a branch: `git checkout -b feature/your-feature`
+3. Commit your change
+4. Push and open a pull request
 
-Found a bug? Open an issue first so we can discuss it.
+For bugs, open an issue first so we can work out what's going on.
 
----
+## License
 
-## 📄 License
+MIT. See [LICENSE](LICENSE).
 
-MIT License — free to use, modify, and share. See the [LICENSE](LICENSE) file.
+## Author
 
----
-
-## 👤 Author
-
-**XRakib7** — Personal project
-🔗 GitHub: https://github.com/XRakib7
-
----
-
-_Made with ❤️ and Flask. Your files, your network, your cloud._
+XRakib7 — https://github.com/XRakib7
