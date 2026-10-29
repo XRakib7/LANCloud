@@ -152,6 +152,7 @@ A few details worth knowing:
 - The chunk size is `UPLOAD_CHUNK_SIZE` near the top of `app.py` (8 MB by default). Increase it only if you have plenty of RAM on both devices; decrease it on a slow or unstable link.
 - Unfinished parts live in the system temp folder (`lancloud-uploads`) and are cleaned up after 24 hours. You can delete that folder while the app is stopped if you want the space back sooner.
 - File downloads use HTTP Range requests, so a browser or download manager can resume a large file. Folder downloads are a ZIP stream: they start immediately and need no extra disk space, but they cannot be resumed.
+- On Android, pick local files with the **Files** app (for example from **Downloads** or **DCIM**). Files opened from Google Drive, Photos or other cloud providers can arrive as unreadable placeholders. The uploader now stops with a clear message instead of creating a 0-byte file; copy the file to the phone first and try again.
 - On Android, run `termux-wake-lock` before a long transfer so Android does not suspend Termux.
 
 If you put LANCloud behind Nginx or another reverse proxy, allow chunk-sized request bodies (16 MB is plenty with the default chunk size) and give uploads a generous read timeout. The built-in Flask server does not need any extra configuration.
@@ -222,6 +223,16 @@ Run the app from a terminal and read the traceback. The usual causes are permiss
 **`C:\Windows` or a large folder feels slow**
 
 Only the size column is slow, and it's intentionally capped. The listing itself is quick, and opening, downloading, renaming and deleting still work.
+
+**A big upload from Android finishes immediately and leaves a 0-byte file**
+
+This is an Android file-picker problem, not a LANCloud problem. Some providers (Google Drive, Photos, cloud file managers) give the browser a file handle that reports `0 B` and cannot be read. The page used to trust that value and complete an empty upload. It now refuses and explains what to do:
+
+1. Download or copy the file into the phone's own storage, such as `Download` or `DCIM`.
+2. In Chrome's file picker, choose **Files** (not Drive/Photos) and open it from there.
+3. If the picker still shows `0 B`, transfer that particular file with a USB cable, MTP, or `adb push` instead. No web page can read a file the browser itself cannot open.
+
+The server also rejects a chunked upload whose size is 0 unless the page explicitly confirms that the file is genuinely empty, so a failed Android pick can no longer create a silent 0-byte file.
 
 ## Security
 

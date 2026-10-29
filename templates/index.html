@@ -968,7 +968,7 @@ function promptNewFolder() {
 
   function renderItem(item) {
     if (!item.el) return;
-    const total = item.file.size;
+    const total = item.total || item.file.size || 0;
     const percent = total ? Math.min(100, (item.uploaded / total) * 100) : 0;
 
     item.el.bar.style.width = (item.status === 'done' ? 100 : percent).toFixed(2) + '%';
@@ -1046,6 +1046,27 @@ function promptNewFolder() {
     }
   }
 
+  const ZERO_SIZE_HELP = 'The browser reported this file as 0 B, so there is nothing it can send. ' +
+    'On Android this usually means the file was picked from Google Drive, Photos, or another ' +
+    'cloud/provider that hands the page an unreadable placeholder. Copy the file to the phone\'s ' +
+    'Downloads folder first, then pick it again with the Files app.';
+
+  async function checkReadable(file) {
+    // Android cloud providers sometimes report a real size but throw
+    // NotReadableError as soon as a chunk is read. Probe one byte so the user
+    // gets a clear message before a server-side upload session is created.
+    try {
+      const probe = await file.slice(0, 1).arrayBuffer();
+      if (probe.byteLength !== 1) throw new Error('empty probe');
+    } catch (err) {
+      throw new Error(
+        'The browser cannot read this file. On Android, copy it to Downloads or pick it ' +
+        'with the Files app; cloud apps such as Google Drive and Photos often provide an ' +
+        'unreadable placeholder.'
+      );
+    }
+  }
+
   async function uploadOne(item) {
     item.error = null;
     item.cancelled = false;
@@ -1055,15 +1076,36 @@ function promptNewFolder() {
     item.speed = 0;
     setStatus(item, 'Starting\u2026');
 
+    let total = Number(item.total) || Number(item.file.size) || 0;
+    item.total = total;
     let offset = 0;
+
+    if (total > 0) {
+      await checkReadable(item.file);
+    } else if (!item.emptyConfirmed) {
+      // A 5 GB file from an Android cloud provider can be reported as 0 B.
+      // Never turn that into a silent 0-byte upload: only continue when the
+      // user explicitly confirms that the file really is empty.
+      const reallyEmpty = window.confirm(
+        'The browser reports "' + item.file.name + '" as 0 B.\n\n' +
+        'If this is genuinely an empty file, click OK to create an empty file.\n\n' +
+        'If it is a large file, click Cancel, copy it to the phone\'s Downloads ' +
+        'folder, and pick it again with the Files app.'
+      );
+      if (!reallyEmpty) throw new Error(ZERO_SIZE_HELP);
+      item.emptyConfirmed = true;
+    }
 
     if (item.uploadId) {
       // Retry/resume: ask the server how many bytes it already has.
       try {
         const status = await fetchJson(apiUrl('statusBase', item.uploadId));
         offset = Number(status.received) || 0;
-        if (Number(status.size) >= 0) item.total = Number(status.size) || item.file.size;
-        if (item.total && offset >= item.total) offset = item.total;
+        if (Number(status.size) > 0) {
+          total = Number(status.size);
+          item.total = total;
+        }
+        if (total && offset >= total) offset = total;
       } catch (err) {
         item.uploadId = null;
         offset = 0;
@@ -1075,7 +1117,11 @@ function promptNewFolder() {
       form.append('target_path', cfg.targetPath);
       form.append('name', item.file.name);
       form.append('relative_path', item.relPath || item.file.name);
-      form.append('size', String(item.file.size));
+      form.append('size', String(total));
+      // The server refuses size=0 unless the page explicitly confirms that
+      // this is an intentional empty file. This stops an unreadable Android
+      // file from being stored as a 0-byte file.
+      if (total === 0) form.append('empty', '1');
 
       const init = await fetchJson(cfg.initUrl, { method: 'POST', body: form });
       item.uploadId = init.upload_id;
@@ -1090,7 +1136,6 @@ function promptNewFolder() {
     setStatus(item, 'Uploading\u2026');
     touchProgress(item);
 
-    const total = item.file.size;
     let retries = 0;
 
     while (offset < total) {

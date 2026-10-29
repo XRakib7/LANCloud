@@ -811,6 +811,22 @@ def upload_init():
     if expected_size < 0:
         return _upload_error('Invalid file size', 400)
 
+    # Android's document picker can hand the browser a File whose size is 0
+    # even when the real file is several gigabytes (common with Google Drive,
+    # Photos and other cloud providers). If we trusted that value the client
+    # would skip every chunk and "complete" an empty upload, leaving a 0-byte
+    # file. Require the page to confirm that an empty file is intentional.
+    empty_upload = str(request.form.get('empty', '')).lower() in ('1', 'true', 'yes')
+    if expected_size == 0 and not empty_upload:
+        return _upload_error(
+            'The browser reported this file as 0 bytes. On Android this usually '
+            'means it was picked from Google Drive, Photos or another cloud '
+            'provider. Copy it to the phone\'s Downloads folder and try again.',
+            400,
+        )
+    if expected_size > 0 and empty_upload:
+        return _upload_error('Invalid file size', 400)
+
     if os.path.isdir(destination):
         return _upload_error('A folder with that name already exists', 409)
 
@@ -823,6 +839,7 @@ def upload_init():
         'target': pathmod.abspath(safe_path),
         'parts': parts,
         'size': expected_size,
+        'empty': expected_size == 0,
         'created': time.time(),
     }
 
@@ -907,6 +924,8 @@ def upload_chunk(upload_id):
             )
         if total == 0 and expected > current:
             return _upload_error('Empty chunk', 400, received=current)
+        if expected == 0 and total > 0:
+            return _upload_error('This upload is marked as an empty file', 400, received=current)
         if expected and current + total > expected:
             return _upload_error('Chunk exceeds the file size', 413, received=current)
 
@@ -973,6 +992,12 @@ def upload_complete(upload_id):
 
             received = _upload_received(part_path)
             expected = int(meta.get('size') or 0)
+            if expected == 0 and not meta.get('empty'):
+                _remove_upload_files(part_path, meta_path)
+                return _upload_error(
+                    'This upload was not confirmed as an empty file, so no file was created',
+                    400,
+                )
             if received != expected:
                 return _upload_error(
                     'Upload is incomplete',
