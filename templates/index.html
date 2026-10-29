@@ -298,6 +298,165 @@ tbody td {
 
 .hidden { display: none !important; }
 
+.btn-small {
+  padding: 3px 8px;
+  font-size: 11px;
+  gap: 3px;
+}
+
+/* Drag-and-drop target */
+.drop-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 997;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.45);
+  pointer-events: none;
+}
+.drop-overlay.active { display: flex; }
+.drop-overlay-inner {
+  background: var(--bg);
+  color: var(--text);
+  border: 2px dashed var(--primary);
+  border-radius: 12px;
+  padding: 36px 52px;
+  font-size: 18px;
+  font-weight: 600;
+  text-align: center;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3);
+}
+.drop-overlay-inner small {
+  display: block;
+  margin-top: 6px;
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--text-secondary);
+}
+
+/* Upload / transfer panel */
+.upload-panel {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  z-index: 998;
+  width: min(380px, calc(100vw - 32px));
+  max-height: min(60vh, 520px);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 10px 35px rgba(0, 0, 0, 0.28);
+}
+.upload-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 10px;
+  background: var(--header-bg);
+  border-bottom: 1px solid var(--border);
+  font-size: 13px;
+  font-weight: 600;
+}
+.upload-head-actions { display: flex; align-items: center; gap: 4px; }
+.upload-count {
+  display: inline-block;
+  min-width: 18px;
+  padding: 0 5px;
+  border-radius: 9px;
+  background: var(--primary);
+  color: #fff;
+  font-size: 10px;
+  line-height: 18px;
+  text-align: center;
+  vertical-align: 1px;
+}
+.upload-list {
+  overflow-y: auto;
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.upload-list:empty { display: none; }
+.transfer { display: flex; flex-direction: column; gap: 4px; }
+.transfer-top { display: flex; align-items: center; gap: 6px; }
+.transfer-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  font-weight: 600;
+}
+.transfer-action {
+  flex: 0 0 auto;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  background: var(--bg);
+  color: var(--text-secondary);
+  padding: 2px 7px;
+  font-size: 10px;
+  cursor: pointer;
+}
+.transfer-action:hover { background: var(--bg-hover); color: var(--text); }
+.progress {
+  height: 6px;
+  overflow: hidden;
+  border-radius: 3px;
+  background: var(--bg-alt);
+}
+.progress-bar {
+  height: 100%;
+  width: 0;
+  background: var(--primary);
+  transition: width 0.2s linear;
+}
+.progress-bar.done { background: var(--success); }
+.progress-bar.error { background: var(--danger); }
+.transfer-meta {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+.transfer-meta .transfer-speed { white-space: nowrap; }
+.upload-summary {
+  padding: 6px 10px;
+  border-top: 1px solid var(--border);
+  font-size: 11px;
+  color: var(--text-secondary);
+  background: var(--bg);
+}
+.upload-summary:empty { display: none; }
+
+.upload-reopen {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  z-index: 998;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 13px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--bg);
+  color: var(--text);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.22);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 600;
+}
+.upload-reopen:hover { background: var(--bg-hover); }
+
 @media (max-width: 640px) {
   .main { padding: 4px 8px 8px; }
   .toolbar { flex-direction: column; align-items: stretch; }
@@ -305,6 +464,13 @@ tbody td {
   .col-modified, .col-type { display: none; }
   .col-actions { width: 100px; }
   thead th, tbody td { padding: 5px 6px; font-size: 12px; }
+  .upload-panel {
+    right: 8px;
+    bottom: 8px;
+    width: calc(100vw - 16px);
+    max-height: 55vh;
+  }
+  .upload-reopen { right: 8px; bottom: 8px; }
 }
 </style>
 </head>
@@ -349,6 +515,32 @@ tbody td {
   {% endwith %}
 </div>
 
+{% if not drive_view %}
+<div class="drop-overlay" id="dropOverlay">
+  <div class="drop-overlay-inner">
+    Drop files or folders here
+    <small>They will be uploaded to this folder in chunks, so big files can resume.</small>
+  </div>
+</div>
+
+<div class="upload-panel hidden" id="uploadPanel" aria-live="polite">
+  <div class="upload-head">
+    <span>Transfers <span class="upload-count hidden" id="uploadCount">0</span></span>
+    <div class="upload-head-actions">
+      <button class="btn btn-small" type="button" id="uploadRefresh" title="Reload the file list">&#8635; Refresh</button>
+      <button class="btn btn-small" type="button" id="uploadClear" title="Remove finished transfers from the list">Clear done</button>
+      <button class="icon-btn" type="button" id="uploadClose" title="Hide transfers">&#10005;</button>
+    </div>
+  </div>
+  <div class="upload-list" id="uploadList"></div>
+  <div class="upload-summary" id="uploadSummary"></div>
+</div>
+
+<button class="upload-reopen hidden" type="button" id="uploadReopen" title="Show transfers">
+  &#8679; Transfers <span class="upload-count hidden" id="uploadReopenCount">0</span>
+</button>
+{% endif %}
+
 <div class="main">
   {% if not drive_view %}
   <div class="toolbar">
@@ -362,12 +554,12 @@ tbody td {
   </div>
 
   <form id="uploadForm" action="{{ url_for('upload') }}" method="post" enctype="multipart/form-data" class="hidden">
-    <input type="file" id="fileInput" name="file" multiple onchange="document.getElementById('uploadForm').submit()">
+    <input type="file" id="fileInput" name="file" multiple>
     <input type="hidden" name="target_path" value="{{ form_path }}">
   </form>
 
   <form id="folderUploadForm" action="{{ url_for('upload_folder') }}" method="post" enctype="multipart/form-data" class="hidden">
-    <input type="file" id="folderInput" name="folder" webkitdirectory multiple onchange="document.getElementById('folderUploadForm').submit()">
+    <input type="file" id="folderInput" name="folder" webkitdirectory multiple>
     <input type="hidden" name="target_path" value="{{ form_path }}">
   </form>
 
@@ -470,6 +662,21 @@ tbody td {
 </div>
 
 <form id="deleteForm" method="post" class="hidden"></form>
+
+{% if not drive_view %}
+<script>
+window.LANCLOUD_UPLOAD = {
+  enabled: true,
+  targetPath: {{ form_path|tojson }},
+  chunkSize: {{ upload_chunk_size|tojson }},
+  initUrl: {{ url_for('upload_init')|tojson }},
+  chunkBase: {{ url_for('upload_chunk', upload_id='__UPLOAD_ID__')|tojson }},
+  statusBase: {{ url_for('upload_status', upload_id='__UPLOAD_ID__')|tojson }},
+  completeBase: {{ url_for('upload_complete', upload_id='__UPLOAD_ID__')|tojson }},
+  abortBase: {{ url_for('upload_abort', upload_id='__UPLOAD_ID__')|tojson }}
+};
+</script>
+{% endif %}
 
 <script>
 // Theme toggle
@@ -575,6 +782,654 @@ function promptNewFolder() {
     form.submit();
   }
 }
+
+// ---------------------------------------------------------------------------
+// Large, resumable uploads
+//
+// Files are sent in chunks. The server appends each chunk to a temporary
+// ".part" file, so a dropped connection or a browser refresh can resume from
+// the last byte the server confirmed instead of starting the file over.
+// ---------------------------------------------------------------------------
+(function () {
+  const cfg = window.LANCLOUD_UPLOAD;
+  if (!cfg || !cfg.enabled) return;
+
+  const panel = document.getElementById('uploadPanel');
+  const list = document.getElementById('uploadList');
+  const countBadge = document.getElementById('uploadCount');
+  const summary = document.getElementById('uploadSummary');
+  const overlay = document.getElementById('dropOverlay');
+  const clearButton = document.getElementById('uploadClear');
+  const closeButton = document.getElementById('uploadClose');
+  const refreshButton = document.getElementById('uploadRefresh');
+  const reopenButton = document.getElementById('uploadReopen');
+  const reopenCount = document.getElementById('uploadReopenCount');
+
+  const state = {
+    items: [],
+    active: 0,
+    maxActive: 1,
+    seq: 0,
+    reloading: false,
+    hidden: true
+  };
+
+  const BUSY = ['queued', 'active', 'preparing', 'uploading'];
+
+  function apiUrl(kind, uploadId) {
+    return cfg[kind].replace('__UPLOAD_ID__', encodeURIComponent(uploadId));
+  }
+
+  function sleep(ms) {
+    return new Promise(function (resolve) { setTimeout(resolve, ms); });
+  }
+
+  function formatBytes(bytes) {
+    if (!bytes) return '0 B';
+    const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+    let value = bytes;
+    let index = 0;
+    while (value >= 1024 && index < units.length - 1) {
+      value /= 1024;
+      index += 1;
+    }
+    return (index === 0 ? Math.round(value) : value.toFixed(1)) + ' ' + units[index];
+  }
+
+  function formatSpeed(bytesPerSecond) {
+    if (!bytesPerSecond || !isFinite(bytesPerSecond)) return '';
+    return formatBytes(bytesPerSecond) + '/s';
+  }
+
+  async function fetchJson(url, options) {
+    const response = await fetch(url, options);
+    let data = null;
+    try { data = await response.json(); } catch (err) { /* non-JSON error page */ }
+    if (!response.ok) {
+      const error = new Error((data && data.error) || ('HTTP ' + response.status));
+      error.status = response.status;
+      error.data = data || {};
+      throw error;
+    }
+    return data || {};
+  }
+
+  function sendChunk(item, blob, offset, onProgress) {
+    return new Promise(function (resolve, reject) {
+      const xhr = new XMLHttpRequest();
+      item.xhr = xhr;
+      xhr.open('PUT', apiUrl('chunkBase', item.uploadId), true);
+      xhr.setRequestHeader('X-Upload-Offset', String(offset));
+      xhr.setRequestHeader('Content-Type', 'application/octet-stream');
+      xhr.upload.onprogress = function (event) {
+        if (event.lengthComputable) onProgress(event.loaded);
+      };
+      xhr.onload = function () {
+        item.xhr = null;
+        let data = {};
+        try { data = JSON.parse(xhr.responseText || '{}'); } catch (err) { /* ignore */ }
+        if (xhr.status >= 200 && xhr.status < 300) {
+          resolve(data);
+        } else {
+          const error = new Error(data.error || ('HTTP ' + xhr.status));
+          error.status = xhr.status;
+          error.data = data;
+          reject(error);
+        }
+      };
+      xhr.onerror = function () {
+        item.xhr = null;
+        const error = new Error('Network error while sending');
+        error.status = 0;
+        reject(error);
+      };
+      xhr.onabort = function () {
+        item.xhr = null;
+        const error = new Error('Cancelled');
+        error.cancelled = true;
+        reject(error);
+      };
+      xhr.send(blob);
+    });
+  }
+
+  function showPanel() {
+    state.hidden = false;
+    panel.classList.remove('hidden');
+    reopenButton.classList.add('hidden');
+  }
+
+  function hidePanel() {
+    state.hidden = true;
+    panel.classList.add('hidden');
+    updateCounts();
+  }
+
+  function itemLabel(item) {
+    return item.relPath || item.file.name;
+  }
+
+  function createRow(item) {
+    const row = document.createElement('div');
+    row.className = 'transfer';
+
+    const top = document.createElement('div');
+    top.className = 'transfer-top';
+
+    const name = document.createElement('div');
+    name.className = 'transfer-name';
+    name.textContent = itemLabel(item);
+    name.title = itemLabel(item);
+
+    const action = document.createElement('button');
+    action.type = 'button';
+    action.className = 'transfer-action';
+
+    top.appendChild(name);
+    top.appendChild(action);
+
+    const progress = document.createElement('div');
+    progress.className = 'progress';
+    const bar = document.createElement('div');
+    bar.className = 'progress-bar';
+    progress.appendChild(bar);
+
+    const meta = document.createElement('div');
+    meta.className = 'transfer-meta';
+    const status = document.createElement('span');
+    status.className = 'transfer-status';
+    const speed = document.createElement('span');
+    speed.className = 'transfer-speed';
+    meta.appendChild(status);
+    meta.appendChild(speed);
+
+    row.appendChild(top);
+    row.appendChild(progress);
+    row.appendChild(meta);
+
+    item.el = { row: row, bar: bar, status: status, speed: speed, action: action };
+
+    action.addEventListener('click', function () {
+      if (item.status === 'error') {
+        retryItem(item);
+      } else if (BUSY.indexOf(item.status) !== -1 || item.status === 'uploading') {
+        cancelItem(item);
+      }
+    });
+
+    list.appendChild(row);
+    return row;
+  }
+
+  function setStatus(item, message) {
+    item.message = message;
+    renderItem(item);
+  }
+
+  function renderItem(item) {
+    if (!item.el) return;
+    const total = item.file.size;
+    const percent = total ? Math.min(100, (item.uploaded / total) * 100) : 0;
+
+    item.el.bar.style.width = (item.status === 'done' ? 100 : percent).toFixed(2) + '%';
+    item.el.bar.className = 'progress-bar' +
+      (item.status === 'done' ? ' done' : '') +
+      (item.status === 'error' ? ' error' : '');
+
+    let statusText = item.message || 'Queued';
+    if (item.status === 'uploading' && !total) statusText = 'Uploading';
+    item.el.status.textContent = statusText;
+    item.el.speed.textContent = total
+      ? formatBytes(item.uploaded) + ' / ' + formatBytes(total)
+      : formatBytes(item.uploaded);
+
+    const isBusy = BUSY.indexOf(item.status) !== -1 || item.status === 'uploading';
+    item.el.action.style.display = (isBusy || item.status === 'error') ? '' : 'none';
+    item.el.action.textContent = item.status === 'error' ? 'Retry' : 'Cancel';
+  }
+
+  function touchProgress(item) {
+    const now = performance.now();
+    if (!item.lastTime) {
+      item.lastTime = now;
+      item.lastUploaded = item.uploaded;
+    } else if (now - item.lastTime >= 400) {
+      const seconds = (now - item.lastTime) / 1000;
+      item.speed = (item.uploaded - item.lastUploaded) / seconds;
+      item.lastTime = now;
+      item.lastUploaded = item.uploaded;
+    }
+
+    renderItem(item);
+    if (item.status === 'uploading') {
+      if (item.speed) item.el.speed.textContent += ' \u00b7 ' + formatSpeed(item.speed);
+    }
+  }
+
+  function updateCounts() {
+    const busy = state.items.filter(function (item) { return BUSY.indexOf(item.status) !== -1; }).length;
+    countBadge.textContent = String(busy);
+    countBadge.classList.toggle('hidden', busy === 0);
+    reopenCount.textContent = String(busy);
+    reopenCount.classList.toggle('hidden', busy === 0);
+    reopenButton.classList.toggle('hidden', !state.hidden || state.items.length === 0);
+  }
+
+  function updateSummary() {
+    const busy = state.items.filter(function (item) { return BUSY.indexOf(item.status) !== -1; }).length;
+    const done = state.items.filter(function (item) { return item.status === 'done'; }).length;
+    const failed = state.items.filter(function (item) { return item.status === 'error'; }).length;
+
+    if (busy) {
+      summary.textContent = busy + ' uploading \u00b7 ' + done + ' done' + (failed ? ' \u00b7 ' + failed + ' failed' : '');
+    } else if (failed) {
+      summary.textContent = failed + ' failed \u00b7 ' + done + ' done. Use Retry to resume where it stopped.';
+    } else if (done) {
+      summary.textContent = done + ' file' + (done === 1 ? '' : 's') + ' uploaded successfully.';
+    } else {
+      summary.textContent = '';
+    }
+    updateCounts();
+  }
+
+  function maybeFinish() {
+    const busy = state.items.some(function (item) { return BUSY.indexOf(item.status) !== -1; });
+    const failed = state.items.some(function (item) { return item.status === 'error'; });
+    const done = state.items.some(function (item) { return item.status === 'done'; });
+
+    updateSummary();
+
+    if (!busy && done && !failed && !state.reloading) {
+      state.reloading = true;
+      summary.textContent = 'All uploads complete. Refreshing the file list\u2026';
+      setTimeout(function () { window.location.reload(); }, 900);
+    }
+  }
+
+  async function uploadOne(item) {
+    item.error = null;
+    item.cancelled = false;
+    item.status = 'preparing';
+    item.uploaded = 0;
+    item.lastTime = 0;
+    item.speed = 0;
+    setStatus(item, 'Starting\u2026');
+
+    let offset = 0;
+
+    if (item.uploadId) {
+      // Retry/resume: ask the server how many bytes it already has.
+      try {
+        const status = await fetchJson(apiUrl('statusBase', item.uploadId));
+        offset = Number(status.received) || 0;
+        if (Number(status.size) >= 0) item.total = Number(status.size) || item.file.size;
+        if (item.total && offset >= item.total) offset = item.total;
+      } catch (err) {
+        item.uploadId = null;
+        offset = 0;
+      }
+    }
+
+    if (!item.uploadId) {
+      const form = new FormData();
+      form.append('target_path', cfg.targetPath);
+      form.append('name', item.file.name);
+      form.append('relative_path', item.relPath || item.file.name);
+      form.append('size', String(item.file.size));
+
+      const init = await fetchJson(cfg.initUrl, { method: 'POST', body: form });
+      item.uploadId = init.upload_id;
+      item.chunkSize = Number(init.chunk_size) || cfg.chunkSize;
+      offset = Number(init.received) || 0;
+    }
+
+    if (item.cancelled) throw new Error('Cancelled');
+    if (!item.chunkSize) item.chunkSize = cfg.chunkSize;
+    item.uploaded = offset;
+    item.status = 'uploading';
+    setStatus(item, 'Uploading\u2026');
+    touchProgress(item);
+
+    const total = item.file.size;
+    let retries = 0;
+
+    while (offset < total) {
+      if (item.cancelled) throw new Error('Cancelled');
+      const end = Math.min(offset + item.chunkSize, total);
+      const blob = item.file.slice(offset, end);
+
+      try {
+        const result = await sendChunk(item, blob, offset, function (loaded) {
+          item.uploaded = Math.min(total, offset + loaded);
+          touchProgress(item);
+        });
+        offset = (typeof result.received === 'number') ? result.received : end;
+        retries = 0;
+        item.uploaded = offset;
+        touchProgress(item);
+      } catch (err) {
+        if (item.cancelled || err.cancelled) throw err;
+
+        // A reverse proxy may have a smaller body limit than the app. Halve
+        // the chunk size and try again instead of failing the whole file.
+        if (err.status === 413 && item.chunkSize > 256 * 1024) {
+          item.chunkSize = Math.max(256 * 1024, Math.floor(item.chunkSize / 2));
+          setStatus(item, 'Server limit reached \u00b7 retrying with ' + formatBytes(item.chunkSize) + ' chunks\u2026');
+          continue;
+        }
+
+        // Another request already advanced the file (for example a retry that
+        // overlapped a disconnected one). Jump to the server's position.
+        if (
+          err.status === 409 &&
+          err.data &&
+          typeof err.data.received === 'number' &&
+          err.data.received !== offset
+        ) {
+          offset = err.data.received;
+          retries = 0;
+          continue;
+        }
+
+        retries += 1;
+        if (retries > 4) throw err;
+
+        setStatus(item, 'Connection lost \u00b7 retry ' + retries + '/4\u2026');
+        await sleep(500 * retries);
+
+        try {
+          const status = await fetchJson(apiUrl('statusBase', item.uploadId));
+          if (typeof status.received === 'number') offset = status.received;
+        } catch (statusErr) {
+          if (statusErr.status === 404) throw err;
+        }
+      }
+    }
+
+    setStatus(item, 'Finishing\u2026');
+    let done = null;
+    let completeRetries = 0;
+    while (!done) {
+      try {
+        done = await fetchJson(apiUrl('completeBase', item.uploadId), { method: 'POST' });
+      } catch (err) {
+        completeRetries += 1;
+        if (completeRetries > 4) throw err;
+        await sleep(500 * completeRetries);
+      }
+    }
+
+    item.status = 'done';
+    item.uploaded = total;
+    setStatus(item, 'Done');
+  }
+
+  function retryItem(item) {
+    if (BUSY.indexOf(item.status) !== -1) return;
+    item.status = 'queued';
+    item.uploaded = 0;
+    item.message = 'Queued';
+    renderItem(item);
+    updateSummary();
+    pump();
+  }
+
+  function cancelItem(item) {
+    if (item.status === 'queued') {
+      item.status = 'cancelled';
+      item.message = 'Cancelled';
+      item.cancelled = true;
+      renderItem(item);
+      updateSummary();
+      return;
+    }
+
+    item.cancelled = true;
+    if (item.xhr) {
+      try { item.xhr.abort(); } catch (err) { /* ignore */ }
+    }
+  }
+
+  function cleanupCancelled(item) {
+    item.status = 'cancelled';
+    item.message = 'Cancelled';
+    renderItem(item);
+    if (item.uploadId) {
+      const url = apiUrl('abortBase', item.uploadId);
+      item.uploadId = null;
+      fetch(url, { method: 'POST' }).catch(function () { /* best effort */ });
+    }
+    updateSummary();
+  }
+
+  function pump() {
+    while (state.active < state.maxActive) {
+      const next = state.items.find(function (item) { return item.status === 'queued'; });
+      if (!next) break;
+
+      state.active += 1;
+      next.status = 'active';
+      updateCounts();
+
+      uploadOne(next)
+        .catch(function (err) {
+          if (next.cancelled) {
+            cleanupCancelled(next);
+            return;
+          }
+          next.status = 'error';
+          next.message = err && err.message ? err.message : 'Upload failed';
+          if (next.message === 'Cancelled') next.message = 'Cancelled';
+          renderItem(next);
+        })
+        .finally(function () {
+          state.active -= 1;
+          updateSummary();
+          pump();
+          maybeFinish();
+        });
+    }
+    maybeFinish();
+  }
+
+  function enqueue(entries) {
+    if (!entries || !entries.length) return;
+    showPanel();
+
+    entries.forEach(function (entry) {
+      const file = entry.file;
+      if (!file) return;
+      const item = {
+        seq: state.seq += 1,
+        file: file,
+        relPath: entry.relPath || file.name,
+        status: 'queued',
+        message: 'Queued',
+        uploaded: 0,
+        total: file.size,
+        speed: 0,
+        lastTime: 0,
+        lastUploaded: 0,
+        uploadId: null,
+        chunkSize: cfg.chunkSize,
+        xhr: null,
+        cancelled: false,
+        error: null,
+        el: null
+      };
+      state.items.push(item);
+      createRow(item);
+      renderItem(item);
+    });
+
+    updateSummary();
+    pump();
+  }
+
+  // File and folder pickers
+  const fileInput = document.getElementById('fileInput');
+  if (fileInput) {
+    fileInput.addEventListener('change', function () {
+      const files = Array.from(fileInput.files || []);
+      fileInput.value = '';
+      enqueue(files.map(function (file) { return { file: file, relPath: file.name }; }));
+    });
+  }
+
+  const folderInput = document.getElementById('folderInput');
+  if (folderInput) {
+    folderInput.addEventListener('change', function () {
+      const files = Array.from(folderInput.files || []);
+      folderInput.value = '';
+      enqueue(files.map(function (file) {
+        return { file: file, relPath: file.webkitRelativePath || file.name };
+      }));
+    });
+  }
+
+  clearButton.addEventListener('click', function () {
+    state.items = state.items.filter(function (item) {
+      if (item.status === 'done' || item.status === 'cancelled') {
+        if (item.el && item.el.row.parentNode) item.el.row.parentNode.removeChild(item.el.row);
+        return false;
+      }
+      return true;
+    });
+    updateSummary();
+  });
+
+  closeButton.addEventListener('click', hidePanel);
+  reopenButton.addEventListener('click', showPanel);
+  refreshButton.addEventListener('click', function () {
+    const busy = state.items.some(function (item) { return BUSY.indexOf(item.status) !== -1; });
+    if (!busy || confirm('An upload is still running. Reloading the page will cancel it. Reload anyway?')) {
+      window.location.reload();
+    }
+  });
+
+  // Drag and drop, including dropped folders (Chrome, Edge, Safari).
+  let dragDepth = 0;
+
+  function isFileDrag(event) {
+    if (!event.dataTransfer) return false;
+    const types = event.dataTransfer.types;
+    if (!types) return false;
+    return Array.prototype.indexOf.call(types, 'Files') !== -1;
+  }
+
+  function entryFile(entry) {
+    return new Promise(function (resolve, reject) { entry.file(resolve, reject); });
+  }
+
+  function readAllEntries(reader) {
+    const all = [];
+    return new Promise(function (resolve) {
+      function next() {
+        reader.readEntries(function (batch) {
+          if (!batch.length) {
+            resolve(all);
+            return;
+          }
+          Array.prototype.push.apply(all, batch);
+          next();
+        }, function () { resolve(all); });
+      }
+      next();
+    });
+  }
+
+  async function collectDrop(dataTransfer) {
+    const output = [];
+    const items = Array.from(dataTransfer.items || []);
+
+    if (!items.length) {
+      Array.from(dataTransfer.files || []).forEach(function (file) {
+        output.push({ file: file, relPath: file.name });
+      });
+      return output;
+    }
+
+    const roots = [];
+    items.forEach(function (entry) {
+      if (entry.kind !== 'file') return;
+      const handle = entry.webkitGetAsEntry ? entry.webkitGetAsEntry() : null;
+      if (handle) {
+        roots.push(handle);
+      } else {
+        const file = entry.getAsFile ? entry.getAsFile() : null;
+        if (file) output.push({ file: file, relPath: file.name });
+      }
+    });
+
+    async function walk(entry, parent) {
+      if (entry.isFile) {
+        try {
+          const file = await entryFile(entry);
+          output.push({ file: file, relPath: parent ? parent + '/' + file.name : file.name });
+        } catch (err) { /* unreadable file */ }
+        return;
+      }
+      if (!entry.isDirectory) return;
+
+      const folderPath = parent ? parent + '/' + entry.name : entry.name;
+      const children = await readAllEntries(entry.createReader());
+      for (const child of children) {
+        await walk(child, folderPath);
+      }
+    }
+
+    for (const root of roots) {
+      await walk(root, '');
+    }
+
+    if (!output.length) {
+      Array.from(dataTransfer.files || []).forEach(function (file) {
+        output.push({ file: file, relPath: file.name });
+      });
+    }
+    return output;
+  }
+
+  window.addEventListener('dragenter', function (event) {
+    if (!isFileDrag(event)) return;
+    event.preventDefault();
+    dragDepth += 1;
+    overlay.classList.add('active');
+  });
+
+  window.addEventListener('dragover', function (event) {
+    if (!isFileDrag(event)) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = 'copy';
+  });
+
+  window.addEventListener('dragleave', function (event) {
+    if (!isFileDrag(event)) return;
+    dragDepth = Math.max(0, dragDepth - 1);
+    if (dragDepth === 0) overlay.classList.remove('active');
+  });
+
+  window.addEventListener('drop', function (event) {
+    if (!isFileDrag(event)) return;
+    event.preventDefault();
+    dragDepth = 0;
+    overlay.classList.remove('active');
+    collectDrop(event.dataTransfer).then(function (entries) {
+      enqueue(entries);
+    });
+  });
+
+  // Warn before leaving the page while chunks are in flight.
+  window.addEventListener('beforeunload', function (event) {
+    const busy = state.items.some(function (item) { return BUSY.indexOf(item.status) !== -1; });
+    if (busy) {
+      event.preventDefault();
+      event.returnValue = '';
+    }
+  });
+
+  updateSummary();
+})();
 </script>
 
 </body>

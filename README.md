@@ -11,7 +11,9 @@ It's a single Python file plus a few templates. No database, no accounts, nothin
 
 - Browse the whole filesystem with breadcrumb navigation. On Windows you can switch between drives.
 - Upload single files or an entire folder with its subdirectories.
-- Download a file, or download a folder as a ZIP.
+- Large uploads are sent in resumable chunks with live speed/progress, so a dropped WiFi connection can retry from the last byte instead of starting over.
+- Drag and drop files or folders straight into the page.
+- Download a file with HTTP Range support (browsers and download managers can pause and resume), or download a folder as a ZIP streamed on the fly.
 - Edit text files directly in the browser.
 - Create folders, rename, and delete (with confirmation).
 - Live search as you type, and sortable columns.
@@ -124,9 +126,10 @@ Folder upload depends on the browser. Browsing, downloading, uploading files, ed
 | Switch drives (Windows) | Globe button → **This PC** |
 | Open phone storage (Android) | Home opens internal storage, the phone button is a shortcut, the globe button lists all storage |
 | Upload a file | **Upload File**, one or many |
-| Upload a folder | **Upload Folder**, structure is preserved |
-| Download a file | Download icon next to the file |
-| Download a folder | Download icon next to the folder, delivered as a ZIP |
+| Upload a folder | **Upload Folder**, or drag a folder onto the page. Structure is preserved |
+| Cancel/retry an upload | The transfer panel shows **Cancel**; after a network error, **Retry** resumes from where the server stopped |
+| Download a file | Download icon next to the file. Large files can be paused/resumed by the browser |
+| Download a folder | Download icon next to the folder, delivered as a ZIP streamed on the fly |
 | Edit a text file | Pencil icon, then **Save Changes** |
 | Rename | Rename icon, enter a new name |
 | Delete | Trash icon, then confirm. This is permanent. |
@@ -138,6 +141,20 @@ Folder upload depends on the browser. Browsing, downloading, uploading files, ed
 The app starts in your home directory, but the globe/root button lets you reach the rest of the filesystem, which is handy for editing system configs on a VM or opening another Windows drive.
 
 Folder sizes are calculated with a time budget so that opening something like `C:\Windows` doesn't hang the page. Folders that take too long to scan show `—` instead of a size.
+
+## Large transfers
+
+Uploads do not go through one giant form POST. The browser splits each file into 8 MB chunks and the server appends them to a temporary `.part` file. While a transfer is running, a panel in the bottom-right corner shows progress and speed. If the connection drops, the uploader asks the server how many bytes it already has and continues from there. The same panel lets you cancel a transfer, retry a failed one, or clear finished entries.
+
+A few details worth knowing:
+
+- Keep the browser tab open while an upload runs. The file handle lives in the page, so closing or reloading the tab ends the transfer.
+- The chunk size is `UPLOAD_CHUNK_SIZE` near the top of `app.py` (8 MB by default). Increase it only if you have plenty of RAM on both devices; decrease it on a slow or unstable link.
+- Unfinished parts live in the system temp folder (`lancloud-uploads`) and are cleaned up after 24 hours. You can delete that folder while the app is stopped if you want the space back sooner.
+- File downloads use HTTP Range requests, so a browser or download manager can resume a large file. Folder downloads are a ZIP stream: they start immediately and need no extra disk space, but they cannot be resumed.
+- On Android, run `termux-wake-lock` before a long transfer so Android does not suspend Termux.
+
+If you put LANCloud behind Nginx or another reverse proxy, allow chunk-sized request bodies (16 MB is plenty with the default chunk size) and give uploads a generous read timeout. The built-in Flask server does not need any extra configuration.
 
 ## VirtualBox
 
@@ -236,7 +253,7 @@ Theme colours and file-type icons live in the templates.
 - [ ] Image, video and PDF previews
 - [ ] Copy and move files between directories
 - [ ] Multi-select and bulk actions
-- [ ] Drag-and-drop uploads
+- [ ] Resume uploads after closing the tab
 - [ ] Dockerfile
 
 ## Contributing

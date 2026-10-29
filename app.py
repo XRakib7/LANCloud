@@ -1,7 +1,10 @@
+import errno
+import json
 import mimetypes
 import os
 import ntpath
 import posixpath
+import queue
 import re
 import secrets
 import shutil
@@ -10,13 +13,17 @@ import stat
 import string
 import sys
 import tempfile
+import threading
 import time
 import zipfile
 from datetime import datetime
+from urllib.parse import quote
 
 from flask import (
     Flask,
+    Response,
     flash,
+    jsonify,
     redirect,
     render_template,
     request,
@@ -143,6 +150,30 @@ CODE_EXTENSIONS = {
 # of freezing the page.
 SIZE_SCAN_BUDGET = 0.5
 SIZE_SCAN_MAX_ENTRIES = 5000
+
+# ---------------------------------------------------------------------------
+# Large uploads
+#
+# Browsers are bad at one giant multipart POST: a 10 GB request can run for
+# hours, has no progress that survives a reload, and starts from zero if the
+# WiFi drops. Instead the browser sends fixed-size chunks and the server
+# appends them to a temporary ".part" file. If a chunk fails, the client asks
+# where the server stopped and resumes from there.
+# ---------------------------------------------------------------------------
+UPLOAD_CHUNK_SIZE = 8 * 1024 * 1024
+UPLOAD_MAX_CHUNK = 32 * 1024 * 1024
+UPLOAD_TTL_SECONDS = 24 * 60 * 60
+UPLOAD_ID_RE = re.compile(r'^[A-Za-z0-9_-]{16,64}$')
+UPLOAD_TEMP_ROOT = os.path.join(tempfile.gettempdir(), 'lancloud-uploads')
+
+# Every request is a small chunk, so this limit only stops accidental huge
+# multipart forms. Chunks are checked against UPLOAD_MAX_CHUNK as well.
+app.config['MAX_CONTENT_LENGTH'] = UPLOAD_MAX_CHUNK + 2 * 1024 * 1024
+app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0
+
+_upload_locks = {}
+_upload_locks_guard = threading.Lock()
+_upload_last_cleanup = 0.0
 
 
 # ---------------------------------------------------------------------------
@@ -625,6 +656,382 @@ def redirect_to_dir(abs_path):
     return redirect(url_for_dir(abs_path))
 
 
+# ---------------------------------------------------------------------------
+# Resumable upload sessions
+# ---------------------------------------------------------------------------
+
+def _upload_paths(upload_id):
+    """Return (part_file, meta_file) for an upload id, or (None, None)."""
+    if not UPLOAD_ID_RE.match(str(upload_id or '')):
+        return None, None
+    base = os.path.join(UPLOAD_TEMP_ROOT, upload_id)
+    return base + '.part', base + '.json'
+
+
+def _upload_error(message, status=400, **extra):
+    payload = {'error': message}
+    payload.update(extra)
+    return jsonify(payload), status
+
+
+def _ensure_upload_temp_root():
+    try:
+        os.makedirs(UPLOAD_TEMP_ROOT, exist_ok=True)
+    except OSError:
+        pass
+
+
+def _get_upload_lock(upload_id):
+    with _upload_locks_guard:
+        lock = _upload_locks.get(upload_id)
+        if lock is None:
+            lock = threading.Lock()
+            _upload_locks[upload_id] = lock
+        return lock
+
+
+def _release_upload_lock(upload_id):
+    with _upload_locks_guard:
+        _upload_locks.pop(upload_id, None)
+
+
+def _load_upload_meta(meta_path):
+    try:
+        with open(meta_path, 'r', encoding='utf-8') as handle:
+            meta = json.load(handle)
+    except (OSError, ValueError):
+        return None
+    if not isinstance(meta, dict):
+        return None
+    return meta
+
+
+def _write_upload_meta(meta_path, meta):
+    temp_path = meta_path + '.tmp'
+    with open(temp_path, 'w', encoding='utf-8') as handle:
+        json.dump(meta, handle)
+    os.replace(temp_path, meta_path)
+
+
+def _remove_upload_files(part_path, meta_path):
+    for path in (part_path, meta_path, meta_path + '.tmp'):
+        try:
+            os.unlink(path)
+        except OSError:
+            pass
+
+
+def _upload_received(part_path):
+    try:
+        return os.path.getsize(part_path)
+    except OSError:
+        return 0
+
+
+def _cleanup_stale_uploads(force=False):
+    """Delete abandoned uploads older than the TTL. Cheap and best-effort."""
+    global _upload_last_cleanup
+
+    now = time.time()
+    if not force and now - _upload_last_cleanup < 300:
+        return
+    _upload_last_cleanup = now
+
+    try:
+        names = os.listdir(UPLOAD_TEMP_ROOT)
+    except OSError:
+        return
+
+    for name in names:
+        if not name.endswith('.json'):
+            continue
+        meta_path = os.path.join(UPLOAD_TEMP_ROOT, name)
+        part_path = meta_path[:-5] + '.part'
+        try:
+            newest = max(
+                os.path.getmtime(meta_path),
+                os.path.getmtime(part_path) if os.path.exists(part_path) else 0,
+            )
+        except OSError:
+            continue
+        if now - newest <= UPLOAD_TTL_SECONDS:
+            continue
+        upload_id = name[:-5]
+        lock = _get_upload_lock(upload_id)
+        if not lock.acquire(blocking=False):
+            continue
+        try:
+            _remove_upload_files(part_path, meta_path)
+        finally:
+            lock.release()
+            _release_upload_lock(upload_id)
+
+
+def _safe_upload_destination(target_dir, parts):
+    """Join sanitised upload parts to target_dir, refusing to escape it."""
+    if not parts:
+        return None
+    destination = pathmod.abspath(pathmod.join(target_dir, *parts))
+    base = pathmod.abspath(target_dir)
+    try:
+        if pathmod.normcase(pathmod.commonpath([base, destination])) != pathmod.normcase(base):
+            return None
+    except (AttributeError, ValueError):
+        return None
+    if same_path(destination, base):
+        return None
+    return destination
+
+
+@app.route('/upload/init', methods=['POST'])
+def upload_init():
+    _ensure_upload_temp_root()
+    _cleanup_stale_uploads()
+
+    target_path = request.form.get('target_path', '')
+    safe_path = abs_path_from_virtual(target_path)
+    if not os.path.isdir(safe_path):
+        return _upload_error('Invalid target directory', 400)
+
+    name = str(request.form.get('name', '') or '')
+
+    relative_path = request.form.get('relative_path', '') or name
+    parts = clean_upload_relative_path(relative_path)
+    if not parts:
+        return _upload_error('Invalid file name', 400)
+
+    destination = _safe_upload_destination(safe_path, parts)
+    if not destination:
+        return _upload_error('Invalid destination', 400)
+
+    try:
+        expected_size = int(request.form.get('size', '0'))
+    except (TypeError, ValueError):
+        return _upload_error('Invalid file size', 400)
+    if expected_size < 0:
+        return _upload_error('Invalid file size', 400)
+
+    if os.path.isdir(destination):
+        return _upload_error('A folder with that name already exists', 409)
+
+    upload_id = secrets.token_urlsafe(24)
+    part_path, meta_path = _upload_paths(upload_id)
+    if not part_path:
+        return _upload_error('Could not create upload session', 500)
+
+    meta = {
+        'target': pathmod.abspath(safe_path),
+        'parts': parts,
+        'size': expected_size,
+        'created': time.time(),
+    }
+
+    try:
+        open(part_path, 'ab').close()
+        _write_upload_meta(meta_path, meta)
+    except OSError as exc:
+        _remove_upload_files(part_path, meta_path)
+        return _upload_error(f'Cannot start upload: {exc}', 500)
+
+    return jsonify({
+        'upload_id': upload_id,
+        'chunk_size': UPLOAD_CHUNK_SIZE,
+        'received': 0,
+        'size': expected_size,
+    })
+
+
+@app.route('/upload/chunk/<upload_id>', methods=['POST', 'PUT'])
+def upload_chunk(upload_id):
+    part_path, meta_path = _upload_paths(upload_id)
+    if not part_path:
+        return _upload_error('Invalid upload id', 400)
+
+    lock = _get_upload_lock(upload_id)
+    with lock:
+        meta = _load_upload_meta(meta_path)
+        if meta is None:
+            return _upload_error('Upload session not found', 404)
+
+        try:
+            offset = int(request.headers.get('X-Upload-Offset', ''))
+        except (TypeError, ValueError):
+            return _upload_error('Missing or invalid X-Upload-Offset header', 400)
+        if offset < 0:
+            return _upload_error('Invalid offset', 400)
+
+        current = _upload_received(part_path)
+        if offset != current:
+            return _upload_error(
+                'Offset mismatch, resume from the reported position',
+                409,
+                received=current,
+            )
+
+        expected = int(meta.get('size') or 0)
+        content_length = request.content_length
+        if content_length is not None and content_length > UPLOAD_MAX_CHUNK:
+            return _upload_error('Chunk is too large', 413)
+        if expected and content_length is not None and offset + content_length > expected:
+            return _upload_error('Chunk exceeds the file size', 413)
+
+        # Read the whole chunk into memory before writing. If the connection
+        # drops halfway through, the server keeps its previous good offset and
+        # the browser resends the complete chunk. Writing streams directly to
+        # disk would leave half a chunk behind and make resuming ambiguous.
+        # At most UPLOAD_MAX_CHUNK (32 MB) is buffered, and the client only
+        # sends one chunk at a time.
+        pieces = []
+        total = 0
+        try:
+            while True:
+                piece = request.stream.read(1024 * 1024)
+                if not piece:
+                    break
+                total += len(piece)
+                if total > UPLOAD_MAX_CHUNK:
+                    return _upload_error('Chunk is too large', 413, received=current)
+                pieces.append(piece)
+        except Exception:
+            return _upload_error(
+                'Chunk was interrupted, send it again',
+                400,
+                received=current,
+            )
+
+        if content_length is not None and total != content_length:
+            return _upload_error(
+                'Chunk was interrupted, send it again',
+                400,
+                received=current,
+            )
+        if total == 0 and expected > current:
+            return _upload_error('Empty chunk', 400, received=current)
+        if expected and current + total > expected:
+            return _upload_error('Chunk exceeds the file size', 413, received=current)
+
+        try:
+            with open(part_path, 'ab') as handle:
+                handle.write(b''.join(pieces))
+                handle.flush()
+        except OSError as exc:
+            _truncate_upload(part_path, current)
+            return _upload_error(f'Could not save chunk: {exc}', 500, received=current)
+
+        received = current + total
+        try:
+            os.utime(meta_path, None)
+        except OSError:
+            pass
+
+        return jsonify({
+            'received': received,
+            'size': expected,
+            'complete': bool(expected and received >= expected),
+        })
+
+
+def _truncate_upload(part_path, size):
+    try:
+        with open(part_path, 'r+b') as handle:
+            handle.truncate(size)
+    except OSError:
+        pass
+
+
+@app.route('/upload/status/<upload_id>')
+def upload_status(upload_id):
+    part_path, meta_path = _upload_paths(upload_id)
+    if not part_path:
+        return _upload_error('Invalid upload id', 400)
+
+    meta = _load_upload_meta(meta_path)
+    if meta is None:
+        return _upload_error('Upload session not found', 404)
+
+    received = _upload_received(part_path)
+    expected = int(meta.get('size') or 0)
+    return jsonify({
+        'received': received,
+        'size': expected,
+        'complete': bool(expected and received >= expected),
+    })
+
+
+@app.route('/upload/complete/<upload_id>', methods=['POST'])
+def upload_complete(upload_id):
+    part_path, meta_path = _upload_paths(upload_id)
+    if not part_path:
+        return _upload_error('Invalid upload id', 400)
+
+    lock = _get_upload_lock(upload_id)
+    with lock:
+        try:
+            meta = _load_upload_meta(meta_path)
+            if meta is None:
+                return _upload_error('Upload session not found', 404)
+
+            received = _upload_received(part_path)
+            expected = int(meta.get('size') or 0)
+            if received != expected:
+                return _upload_error(
+                    'Upload is incomplete',
+                    400,
+                    received=received,
+                    size=expected,
+                )
+
+            target_dir = meta.get('target') or ''
+            parts = meta.get('parts') or []
+            destination = _safe_upload_destination(target_dir, parts)
+            if not destination or not os.path.isdir(target_dir):
+                _remove_upload_files(part_path, meta_path)
+                return _upload_error('The destination folder no longer exists', 404)
+
+            if os.path.isdir(destination):
+                return _upload_error('A folder with that name already exists', 409)
+
+            try:
+                parent = pathmod.dirname(destination)
+                if parent:
+                    os.makedirs(parent, exist_ok=True)
+                try:
+                    os.replace(part_path, destination)
+                except OSError as exc:
+                    # Temp dir and target can live on different drives/filesystems
+                    # (common on Android and Windows). Fall back to a copy.
+                    if exc.errno != errno.EXDEV:
+                        raise
+                    shutil.move(part_path, destination)
+            except OSError as exc:
+                return _upload_error(f'Could not finish upload: {exc}', 500)
+
+            _remove_upload_files(part_path, meta_path)
+            virtual = virtual_path_from_abs(destination)
+            return jsonify({
+                'ok': True,
+                'name': pathmod.basename(destination),
+                'path': virtual,
+                'url': url_for('download', filename=virtual),
+                'redirect': url_for_dir(pathmod.dirname(destination)),
+            })
+        finally:
+            _release_upload_lock(upload_id)
+
+
+@app.route('/upload/abort/<upload_id>', methods=['POST', 'DELETE'])
+def upload_abort(upload_id):
+    part_path, meta_path = _upload_paths(upload_id)
+    if not part_path:
+        return _upload_error('Invalid upload id', 400)
+
+    lock = _get_upload_lock(upload_id)
+    with lock:
+        _remove_upload_files(part_path, meta_path)
+    _release_upload_lock(upload_id)
+    return jsonify({'ok': True})
+
+
 def render_android_storage():
     """Android-only storage overview shown by the globe/root button."""
     internal = android_internal_storage()
@@ -679,6 +1086,7 @@ def inject_android_helpers():
             url_for('index', subpath=virtual_path_from_abs(internal))
             if internal else None
         ),
+        'upload_chunk_size': UPLOAD_CHUNK_SIZE,
     }
 
 
@@ -691,9 +1099,21 @@ def favicon():
     return '', 204
 
 
+@app.errorhandler(413)
+def request_too_large(_error):
+    if request.path.startswith('/upload/'):
+        return _upload_error(
+            'That chunk is too large. The uploader sends files in smaller pieces.',
+            413,
+        )
+    flash('That file is too large for a single request. Try again from the toolbar.', 'error')
+    return redirect(url_for('index'))
+
+
 @app.route('/')
 @app.route('/<path:subpath>')
 def index(subpath=''):
+    _cleanup_stale_uploads()
     show_device_root = 'device_root' in request.args
     show_root = 'root' in request.args or show_device_root
 
@@ -867,7 +1287,7 @@ def upload_folder():
     return redirect_to_dir(safe_path)
 
 
-@app.route('/download/<path:filename>')
+@app.route('/download/<path:filename>', methods=['GET', 'HEAD'])
 def download(filename):
     safe_path = abs_path_from_virtual(filename)
 
@@ -879,17 +1299,110 @@ def download(filename):
         return download_folder(safe_path)
 
     try:
-        return send_file(safe_path, as_attachment=True, download_name=os.path.basename(safe_path))
+        # conditional=True enables Range requests, so browsers and download
+        # managers can pause/resume a multi-gigabyte file instead of starting
+        # over when the connection drops. send_file streams from disk and
+        # never loads the whole file into memory.
+        return send_file(
+            safe_path,
+            as_attachment=True,
+            download_name=os.path.basename(safe_path),
+            conditional=True,
+            max_age=0,
+        )
     except OSError as exc:
         flash(f'Cannot download this file: {exc}', 'error')
         return redirect_to_dir(pathmod.dirname(safe_path))
 
 
-def _remove_quietly(path):
-    try:
-        os.unlink(path)
-    except OSError:
+class _ZipQueueStream:
+    """A write-only file object that feeds a ZIP straight to the browser.
+
+    zipfile detects that tell()/seek() are not available and switches to data
+    descriptors, which is exactly what an unseekable network stream needs.
+    A bounded queue keeps memory use small even for a multi-gigabyte folder.
+    """
+
+    def __init__(self, output, stopped):
+        self.output = output
+        self.stopped = stopped
+
+    def write(self, data):
+        if not data:
+            return 0
+        while True:
+            if self.stopped.is_set():
+                raise BrokenPipeError('download cancelled')
+            try:
+                self.output.put(bytes(data), timeout=0.5)
+                return len(data)
+            except queue.Full:
+                continue
+
+    def flush(self):
         pass
+
+    def tell(self):
+        raise OSError('stream is not seekable')
+
+    def seekable(self):
+        return False
+
+    def writable(self):
+        return True
+
+
+def _zip_compress_type(path):
+    # Already-compressed media would only waste CPU.
+    ext = os.path.splitext(path)[1].lower()
+    if (
+        ext in IMAGE_EXTENSIONS
+        or ext in AUDIO_EXTENSIONS
+        or ext in VIDEO_EXTENSIONS
+        or ext in ARCHIVE_EXTENSIONS
+        or ext in PDF_EXTENSIONS
+    ):
+        return zipfile.ZIP_STORED
+    return zipfile.ZIP_DEFLATED
+
+
+def _feed_zip(safe_path, output, stopped):
+    """Background thread: build the ZIP and push bytes into the response."""
+    try:
+        with zipfile.ZipFile(_ZipQueueStream(output, stopped), 'w', allowZip64=True) as archive:
+            for root, dirs, files in os.walk(safe_path):
+                if stopped.is_set():
+                    break
+                dirs[:] = [
+                    name for name in dirs
+                    if not is_redirected_dir(os.path.join(root, name))
+                ]
+                for name in files:
+                    if stopped.is_set():
+                        break
+                    full_path = os.path.join(root, name)
+                    arcname = os.path.relpath(full_path, safe_path).replace('\\', '/')
+                    try:
+                        archive.write(
+                            full_path,
+                            arcname,
+                            compress_type=_zip_compress_type(full_path),
+                        )
+                    except OSError:
+                        # A file can disappear or be locked while the ZIP is
+                        # being built. Skip it and keep the download alive.
+                        pass
+    except (BrokenPipeError, OSError):
+        pass
+    except Exception:
+        app.logger.exception('Could not build folder ZIP')
+    finally:
+        while not stopped.is_set():
+            try:
+                output.put(None, timeout=0.5)
+                break
+            except queue.Full:
+                continue
 
 
 def download_folder(safe_path):
@@ -897,44 +1410,47 @@ def download_folder(safe_path):
         flash('Folder not found', 'error')
         return redirect(url_for('index'))
 
-    temp_file = tempfile.NamedTemporaryFile(prefix='lancloud_', suffix='.zip', delete=False)
-    temp_name = temp_file.name
-    temp_file.close()
-    temp_norm = os.path.normcase(os.path.abspath(temp_name))
-
-    try:
-        with zipfile.ZipFile(temp_name, 'w', zipfile.ZIP_DEFLATED, allowZip64=True) as archive:
-            for root, dirs, files in os.walk(safe_path):
-                dirs[:] = [name for name in dirs if not is_redirected_dir(os.path.join(root, name))]
-                for name in files:
-                    full_path = os.path.join(root, name)
-                    # The ZIP itself can live inside the folder being zipped
-                    # (Windows temp is under C:\Users\...). Never include it.
-                    if os.path.normcase(os.path.abspath(full_path)) == temp_norm:
-                        continue
-                    arcname = os.path.relpath(full_path, safe_path).replace('\\', '/')
-                    try:
-                        archive.write(full_path, arcname)
-                    except OSError:
-                        pass
-    except OSError as exc:
-        _remove_quietly(temp_name)
-        flash(f'Could not create ZIP: {exc}', 'error')
-        return redirect_to_dir(safe_path)
-
     clean_path = safe_path.rstrip('/\\')
     folder_name = pathmod.basename(clean_path)
     if not folder_name:
         drive = pathmod.splitdrive(clean_path)[0].replace(':', '')
         folder_name = f'{drive}_drive' if drive else 'folder'
 
-    response = send_file(
-        temp_name,
-        mimetype='application/zip',
-        as_attachment=True,
-        download_name=f'{folder_name}.zip',
+    output = queue.Queue(maxsize=16)
+    stopped = threading.Event()
+    worker = threading.Thread(
+        target=_feed_zip,
+        args=(safe_path, output, stopped),
+        daemon=True,
     )
-    response.call_on_close(lambda: _remove_quietly(temp_name))
+    worker.start()
+
+    def generate():
+        try:
+            while True:
+                data = output.get()
+                if data is None:
+                    break
+                yield data
+        finally:
+            # The browser closed the tab or cancelled the download. Tell the
+            # writer to stop and drop its queue so it does not leak.
+            stopped.set()
+
+    download_name = f'{folder_name}.zip'
+    ascii_name = download_name.encode('ascii', 'ignore').decode('ascii') or 'folder.zip'
+    ascii_name = (
+        ascii_name.replace('"', '').replace('\\', '')
+        .replace('\r', '').replace('\n', '')
+    )
+
+    response = Response(generate(), mimetype='application/zip')
+    response.headers['Content-Disposition'] = (
+        f'attachment; filename="{ascii_name}"; '
+        f"filename*=UTF-8''{quote(download_name, safe='')}"
+    )
+    response.headers['X-Content-Type-Options'] = 'nosniff'
+    response.call_on_close(stopped.set)
     return response
 
 
