@@ -28,14 +28,18 @@ It's a single Python file plus a few templates. No database, no accounts, nothin
 Nothing else. No Node.js, no Docker, no config file.
 
 ## Setup
-
+for linux 
 ```bash
 git clone https://github.com/XRakib7/LANCloud.git
 cd LANCloud
-python -m pip install -r requirements.txt
-python app.py
+python3 -m pip install -r requirements.txt
+python3 app.py
 ```
-
+If it does not works then 
+```
+sudo apt install python3-flask -y
+python3 app.py
+```
 On Windows use the launcher instead of `python`:
 
 ```bat
