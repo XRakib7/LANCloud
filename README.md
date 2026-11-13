@@ -40,6 +40,7 @@ If it does not works then
 sudo apt install python3-flask -y
 python3 app.py
 ```
+if still not wroks in virtual box or any other virtual device then set the network adapter to bridge adapter.
 On Windows use the launcher instead of `python`:
 
 ```bat
